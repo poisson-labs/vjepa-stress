@@ -1,62 +1,129 @@
 """Per-cell checkpointing to Parquet.
 
-Each completed cell writes one Parquet shard under
-``{output_dir}/{cell_id}.parquet`` containing one row per
-(video_id, metric, value) tuple plus the cell's coordinates. The full sweep
-is recovered by globbing the shard directory and concatenating with DuckDB.
+Each completed cell writes one Parquet shard at
+``{output_dir}/{cell_id}.parquet`` containing one row per video. Shards
+are written atomically: data goes to ``{cell_id}.parquet.tmp``, fsync'd,
+and renamed into place. A crash mid-write therefore leaves no
+half-written shard that ``cell_completed`` would mistake for done.
 
-This decouples cell completion from the global sweep state: a crashed run
-can be resumed by skipping cells whose shard already exists on disk.
+The shard schema is locked by ``src.sweep.schema.ARROW_SCHEMA``. Reads
+go through ``load_shards`` which returns a DuckDB relation so callers
+can run analytical queries without materializing the full table.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
 from pathlib import Path
 
-import pandas as pd
+import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from src.sweep.matrix import Cell
-
-
-@dataclass
-class CellResult:
-    """The metric payload for one (cell, video_id) pair."""
-
-    video_id: str
-    m1: float | None = None
-    m2: float | None = None
-    m3: float | None = None
-    notes: str = ""
+from src.sweep.schema import ARROW_SCHEMA, Row, rows_to_arrow_table
 
 
 def shard_path(output_dir: Path, cell: Cell) -> Path:
-    """Resolve the Parquet path for one cell."""
+    """Resolve the canonical Parquet path for one cell."""
     return Path(output_dir) / f"{cell.cell_id}.parquet"
 
 
-def is_complete(output_dir: Path, cell: Cell) -> bool:
-    """Return True if a shard already exists for this cell."""
-    return shard_path(output_dir, cell).exists()
+def _tmp_path(final: Path) -> Path:
+    return final.with_suffix(final.suffix + ".tmp")
 
 
-def write_shard(  # pragma: no cover - placeholder
-    output_dir: Path,
-    cell: Cell,
-    results: list[CellResult],
-) -> Path:
-    """Write one cell's results to Parquet and return the path.
+def cell_completed(output_dir: Path, cell: Cell) -> bool:
+    """True iff a usable shard already exists for this cell.
 
-    The Stage 0 implementation should serialize ``results`` to a tidy
-    DataFrame with columns
-    ``[cell_id, tier, model, perturbation, strength, video_id, m1, m2, m3, notes]``
-    and write it via ``pyarrow``. Atomic write (write to ``.tmp`` and rename)
-    is required so that a crash mid-write doesn't leave a half-written shard
-    that ``is_complete`` would treat as done.
+    A shard counts as complete only when:
+
+    - the file exists,
+    - it has non-zero size,
+    - it parses as a Parquet file with the expected schema,
+    - it contains at least one row.
+
+    Anything weaker would let a crash that happened mid-rename be
+    misread as completion. The runner uses this to skip already-done
+    cells on resume.
     """
-    raise NotImplementedError
+    path = shard_path(output_dir, cell)
+    if not path.exists():
+        return False
+    try:
+        if path.stat().st_size == 0:
+            return False
+        meta = pq.read_metadata(path)
+    except (OSError, pa.ArrowInvalid):
+        return False
+    if meta.num_rows < 1:
+        return False
+    schema = pq.read_schema(path)
+    if schema.names != ARROW_SCHEMA.names:
+        return False
+    return True
 
 
-def load_shards(output_dir: Path) -> pd.DataFrame:  # pragma: no cover - placeholder
-    """Glob all Parquet shards and return one tidy DataFrame."""
-    raise NotImplementedError
+def write_shard(output_dir: Path, cell: Cell, rows: list[Row]) -> Path:
+    """Atomically write one cell's rows to ``{cell_id}.parquet``.
+
+    Refuses to write an empty shard: an empty cell is a runner bug, and
+    a zero-row Parquet file would defeat the ``cell_completed`` guard.
+    """
+    if not rows:
+        raise ValueError(f"refusing to write empty shard for cell {cell.cell_id}")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    final = shard_path(output_dir, cell)
+    tmp = _tmp_path(final)
+
+    table = rows_to_arrow_table(rows)
+    if table.schema != ARROW_SCHEMA:
+        raise ValueError(
+            f"row table schema does not match ARROW_SCHEMA for cell {cell.cell_id}"
+        )
+
+    # Stale tmp from a previous crash would shadow ours; remove first.
+    if tmp.exists():
+        tmp.unlink()
+
+    with pq.ParquetWriter(tmp, ARROW_SCHEMA) as writer:
+        writer.write_table(table)
+    fd = os.open(tmp, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+    os.rename(tmp, final)
+    return final
+
+
+def load_shards(output_dir: Path) -> "duckdb.DuckDBPyRelation":
+    """Return a DuckDB relation over every shard in ``output_dir``.
+
+    DuckDB scans Parquet directly without copying into memory; callers
+    can chain ``.df()`` or further SQL on the returned relation.
+    """
+    output_dir = Path(output_dir)
+    pattern = str(output_dir / "*.parquet")
+    con = duckdb.connect()
+    return con.from_query(f"SELECT * FROM read_parquet('{pattern}')")
+
+
+def cleanup_stale_tmp(output_dir: Path) -> int:
+    """Remove any ``*.parquet.tmp`` left behind by a crashed writer.
+
+    Returns the number of files removed. Safe to call before a run; an
+    in-flight writer never has a competing tmp because the writer
+    deletes a stale tmp before opening its own.
+    """
+    output_dir = Path(output_dir)
+    if not output_dir.exists():
+        return 0
+    n = 0
+    for p in output_dir.glob("*.parquet.tmp"):
+        p.unlink()
+        n += 1
+    return n
