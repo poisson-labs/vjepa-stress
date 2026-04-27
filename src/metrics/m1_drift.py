@@ -6,9 +6,9 @@ Per RESEARCH.md §3:
 
 where ``F(v)_{t,p}`` is the L2-normalized token at frame ``t`` and spatial
 position ``p`` from the frozen encoder. M1 is the average cosine distance
-between paired tokens, taken over frames and spatial positions. It is bounded
-in ``[0, 2]`` and equals zero iff every pair of tokens is identical (modulo
-sign), which is the calibration anchor.
+between paired tokens, taken over frames and spatial positions. It is
+bounded in ``[0, 2]`` and equals zero iff every pair of tokens is identical
+(modulo sign), which is the calibration anchor.
 """
 
 from __future__ import annotations
@@ -29,4 +29,9 @@ def compute_m1(
     Returns:
         Scalar tensor in ``[0, 2]`` giving the M1 drift value.
     """
-    raise NotImplementedError("M1: implement in Stage 0.")
+    if features_clean.shape != features_perturbed.shape:
+        raise ValueError(
+            f"shape mismatch: {features_clean.shape} vs {features_perturbed.shape}"
+        )
+    cos = (features_clean * features_perturbed).sum(dim=-1)
+    return (1.0 - cos).mean()

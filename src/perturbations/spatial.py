@@ -7,12 +7,19 @@ import numpy as np
 from src.perturbations.base import Perturbation
 
 
+# Side length of the occluding square at strength=1, as a fraction of the
+# short side. 0.5 covers a quarter of the frame area at full strength.
+_OCCLUSION_MAX_FRAC: float = 0.5
+_OCCLUSION_FILL: int = 128  # neutral gray
+
+
 class Occlusion(Perturbation):
     """P4 — Random rectangular occlusion (cutout) in pixel space.
 
-    Strength maps to the side length of the occluding rectangle as a fraction
-    of the short side. Position is drawn per video from ``seed`` and held
-    constant across frames so the occlusion is static.
+    Square side length is ``strength * 0.5 * min(H, W)``. Position is drawn
+    once per video from ``seed`` and held constant across frames so the
+    occlusion is static — this isolates the spatial-occluder failure mode
+    from any motion-handling failure.
     """
 
     name = "occlusion"
@@ -22,7 +29,15 @@ class Occlusion(Perturbation):
         self._validate(frames, strength)
         if strength == 0.0:
             return frames.copy()
-        raise NotImplementedError("Occlusion: implement in Stage 0.")
+        rng = np.random.default_rng(seed)
+        _, h, w, _ = frames.shape
+        side = max(1, int(round(float(strength) * _OCCLUSION_MAX_FRAC * min(h, w))))
+        side = min(side, h, w)
+        y0 = int(rng.integers(0, h - side + 1))
+        x0 = int(rng.integers(0, w - side + 1))
+        out = frames.copy()
+        out[:, y0 : y0 + side, x0 : x0 + side, :] = _OCCLUSION_FILL
+        return out
 
 
 class HorizontalFlip(Perturbation):

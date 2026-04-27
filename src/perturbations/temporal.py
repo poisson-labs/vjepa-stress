@@ -1,8 +1,9 @@
 """Temporal perturbations: P3 Frame drops, P7 Reverse.
 
-Frame drops perturb the time axis by removing frames and re-padding. Reverse
-inverts the time axis as a calibration probe: a model that was sensitive to
-direction should show a measurable M2 jump.
+Frame drops perturb the time axis by removing frames and re-padding with the
+previous frame so the clip length is preserved. Reverse inverts the time
+axis as a calibration probe; an encoder that ignored direction would show
+zero M2 jump on Reverse, which would itself be a result.
 """
 
 from __future__ import annotations
@@ -12,11 +13,17 @@ import numpy as np
 from src.perturbations.base import Perturbation
 
 
+# At strength=1 we drop half the frames in expectation; capped so the clip
+# always retains some signal regardless of seed.
+_FRAME_DROPS_MAX_PROB: float = 0.5
+
+
 class FrameDrops(Perturbation):
     """P3 — Drop a fraction of frames and re-pad with the previous frame.
 
-    Strength maps to drop probability in ``[0, drop_max]``; the exact bound
-    is fixed in Stage 0. Drops are sampled per video from ``seed``.
+    Drop probability is ``strength * 0.5``. Frame 0 is always retained so the
+    forward-fill has something to start from. Drops are sampled per video
+    from ``seed`` and held independent of the frame contents.
     """
 
     name = "frame_drops"
@@ -26,7 +33,16 @@ class FrameDrops(Perturbation):
         self._validate(frames, strength)
         if strength == 0.0:
             return frames.copy()
-        raise NotImplementedError("FrameDrops: implement in Stage 0.")
+        rng = np.random.default_rng(seed)
+        drop_prob = float(strength) * _FRAME_DROPS_MAX_PROB
+        t = frames.shape[0]
+        drops = rng.random(t) < drop_prob
+        drops[0] = False
+        out = frames.copy()
+        for i in range(1, t):
+            if drops[i]:
+                out[i] = out[i - 1]
+        return out
 
 
 class Reverse(Perturbation):
@@ -34,8 +50,7 @@ class Reverse(Perturbation):
 
     Calibration probe: only ``strength=1`` is meaningful (full reversal).
     ``strength=0`` is identity. Intermediate strengths are not defined for
-    this perturbation, so the runner should only schedule it at the
-    endpoints.
+    this perturbation, so the runner only schedules it at the endpoints.
     """
 
     name = "reverse"
