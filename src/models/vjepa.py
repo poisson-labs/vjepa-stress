@@ -20,7 +20,7 @@ VARIANT_REPOS: dict[str, str] = {
     "vjepa-2.1-vit-b": "TODO/vjepa-2.1-vit-b",
     "vjepa-2.1-vit-l": "TODO/vjepa-2.1-vit-l",
     "vjepa-2.1-vit-g": "TODO/vjepa-2.1-vit-g",
-    "vjepa-2.1-vit-G": "TODO/vjepa-2.1-vit-G",
+    "vjepa-2.1-vit-giant": "TODO/vjepa-2.1-vit-giant",
 }
 
 

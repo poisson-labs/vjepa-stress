@@ -29,7 +29,7 @@ MODELS: tuple[str, ...] = (
     "vjepa-2.1-vit-b",
     "vjepa-2.1-vit-l",
     "vjepa-2.1-vit-g",
-    "vjepa-2.1-vit-G",
+    "vjepa-2.1-vit-giant",
 )
 
 TIER1_PERTURBATIONS: tuple[str, ...] = (

@@ -140,3 +140,87 @@ What does **not** belong here:
 - TODOs (those live in code comments or a separate task file).
 
 ---
+
+## 2026-04-27 — Stage 0.5: runner + checkpoint glue against fakes
+
+**Commit:** _stage 0.5 series_
+
+The runner is now end-to-end against fakes. 87/87 tests green;
+`python -m src.run_sweep --matrix tier2 --output ... --fake` writes 12
+shards in <1 s and a re-run skips all 12. Tier 1 (200 cells × 2 fake
+videos) writes 400 rows in ~0.4 s on the M4 dev box.
+
+**What landed:**
+
+- `src/sweep/schema.py` — Pydantic v2 `Row` model is the source of
+  truth. `ARROW_SCHEMA` is derived from it; the writer fails fast if
+  the table built from `rows_to_arrow_table` doesn't match. `SCHEMA_VERSION`
+  is recorded in every row and in the manifest; the runner refuses to
+  resume against a manifest whose version doesn't match the code.
+- `src/sweep/manifest.py` — `build_manifest` + `write_manifest`. Seeds
+  are precomputed up-front: `precompute_seeds(video_ids,
+  perturbation_names, master_seed)` returns
+  `dict[video_id][perturbation_name] -> int` derived from
+  `blake2b(master_seed | video_id | perturbation_name)`. A resumed
+  run reads the existing manifest and reuses its seeds, so resumed
+  ≡ fresh bit-for-bit.
+- `src/testing/fakes.py` — `FakeEncoder` (hashes frame bytes + model
+  salt → deterministic L2-normed features; counts `forward_calls`),
+  `FakeVideoDataset` (uint8 clips seeded by
+  `(dataset_name, index, seed)`).
+- `src/sweep/checkpoint.py` — `write_shard` is atomic
+  (`.parquet.tmp` → fsync → rename), refuses to write empty shards,
+  and `cell_completed` only returns True when the file exists, has
+  non-zero size, parses as Parquet with the locked schema, and has
+  ≥1 row. `cleanup_stale_tmp` is called at runner start.
+- `src/sweep/runner.py` — `RunnerConfig` takes `encoder_factory` and
+  `dataset_factory` callables. `run_sweep` groups cells by model, so
+  the encoder for one model is loaded **once** regardless of how many
+  cells reference it (verified by a test: 6 cells × 2 models →
+  `encoder_log == ["vit-b", "vit-l"]`). A test-only
+  `inject_crash_after_cell` hook drives the restart-semantics test.
+- `src/run_sweep.py` — CLI: `--matrix {tier1,tier2,tier3,all,JSON
+  path}`, `--output`, `--fake`, `--n-videos`, `--master-seed`,
+  `--no-resume`, `--inject-crash-after-cell`, `--log-level`.
+
+**Decisions captured at Stage 0.5:**
+
+- **`vjepa-2.1-vit-G` renamed to `vjepa-2.1-vit-giant`.** The original
+  matrix had `vit-g` (1 B params) and `vit-G` (8 B / "Giant") as
+  case-distinct identifiers. macOS HFS+/APFS is case-insensitive by
+  default, so both models tried to write to the same Parquet path
+  (`...vit-g__...parquet`); the second model's cells were silently
+  marked as already-completed. The smoke test caught this on the
+  first tier-2 run (`cells_skipped=3` on a fresh dir). The rename
+  makes the sweep portable across case-insensitive and case-sensitive
+  filesystems without per-platform shimming. Updated in `matrix.py`,
+  `fakes.py`, `models/vjepa.py`, `manifests/manifest.template.json`.
+- **Atomic write contract: `.tmp` + fsync + rename, no empty shards.**
+  `write_shard` raises on an empty row list rather than writing a
+  zero-row file that would defeat `cell_completed`. Mocked-rename
+  test confirms a failed write leaves no shard and no orphan tmp.
+- **Manifest is written once, before any cell runs.** A precomputed
+  seed dict for every (video_id, perturbation_name) pair lives in
+  `manifest.seeds`. The runner looks seeds up by name; nobody else
+  decides what seed a cell uses. This is what makes a resumed run
+  bit-identical to a fresh run.
+- **M3 = NaN until Stage 0.6.** `compute_m3` requires DAVIS-style
+  masks. Until the dataset loaders land, the runner fills `m3` with
+  `math.nan`. NaN survives the Parquet round-trip (test confirms);
+  DuckDB aggregates ignore it.
+- **CLI imports as `python -m src.run_sweep`, not
+  `python -m vjepa_stress.run_sweep`.** A package rename
+  (`src/` → `vjepa_stress/`) is out of scope for Stage 0.5; the
+  spec's `vjepa_stress.run_sweep` form is deferred. The hatch wheel
+  packaging already emits `src/`-rooted modules.
+
+**Stage 0.6 prerequisites (deferred):**
+
+- Real V-JEPA 2.1 loader in `src/models/vjepa.py` (HF
+  `transformers.AutoModel`, pinned revision in the manifest).
+- Real `src/data/{ssv2,davis}.py` loaders. The vl-jepa-repro project
+  has a proven OpenCV pipeline that's numerically equivalent across
+  Mac and Jetson — port that.
+- Wire `compute_m3` into the runner once DAVIS masks are loadable.
+
+---
