@@ -31,7 +31,7 @@ Higher-level decisions and supersedes go in `devlog.md`, not here.
 
 ## Task 1 — Naming consistency rename
 
-**Status:** `[ ]`
+**Status:** `[x]` — landed in commit `65aec69`.
 
 **Goal.** Rename `vjepa-2.1-vit-b` → `vjepa-2.1-vit-base` and
 `vjepa-2.1-vit-l` → `vjepa-2.1-vit-large` everywhere so the four
@@ -72,7 +72,7 @@ string substitution: `f"vjepa2_1_vit_{suffix}_384"`.
 
 ## Task 2 — torch.hub spike on Mac M4
 
-**Status:** `[ ]`
+**Status:** `[~]` — Task 2a done; awaiting user decision on 2b download variant.
 
 **Goal.** Decide D1 (loading mechanism) before writing loader code.
 
@@ -264,4 +264,41 @@ When Stage 0.6 closes, the devlog entry should record:
 
 ## Findings log _(append-only)_
 
-_(empty)_
+### 2026-04-27 — Task 2a pre-flight
+
+**Headline.** All four V-JEPA 2.1 variants exist on torch.hub; HF and direct
+fbaipublicfiles paths are not available. D1 is effectively decided in favor of
+torch.hub.
+
+| Probe | Result |
+|-------|--------|
+| `torch.hub.list('facebookresearch/vjepa2')` | 10 entries; **4 match V-JEPA 2.1**: `vjepa2_1_vit_{base,large,giant,gigantic}_384` |
+| Same, V-JEPA 2.0 contrast | 6 entries: `vjepa2_ac_vit_giant`, `vjepa2_preprocessor`, `vjepa2_vit_giant`, `vjepa2_vit_giant_384`, `vjepa2_vit_huge`, `vjepa2_vit_large` |
+| `HfApi().list_models(author='facebook', search='vjepa')` strict 2.1 filter | **0 V-JEPA 2.1 models on HF** (10 V-JEPA 2.0 models present, e.g. `facebook/vjepa2-vitl-fpc16-256-ssv2`) |
+| `dl.fbaipublicfiles.com/vjepa2/<guess>.pt` for 12 plausible 2.1 names | **All 403** (only V-JEPA 2.0 sanity probe `vitg-384.pt` returns 200, 16.4 GB) |
+
+Naming on torch.hub matches our internal canonical suffixes — the loader can
+derive entry names by f-string substitution: `f"vjepa2_1_vit_{suffix}_384"`.
+
+**Spin-off finding (Stage 0.6 signal).** First spike run crashed with
+`ModuleNotFoundError: No module named 'src.hub'`. Root cause: our project's
+top-level `src/` package shadows `src/hub/...` inside the
+`facebookresearch/vjepa2` repo when torch.hub clones it (the repo dir is added
+to `sys.path` and Python resolves `src` to ours). The spike now uses an
+`_isolate_from_project_src()` helper that scrubs project root from `sys.path`
+and clears cached `src.*` modules before any `torch.hub.*` call.
+
+This will hit the encoder loader too (Task 3). Mitigation options:
+1. Wrap every `torch.hub.load(...)` in the same isolation context.
+2. Rename top-level `src/` → `vjepa_stress/`. Larger but cleaner; eliminates
+   the class of bug.
+
+Recommend (2) before Task 3 lands so the loader doesn't ship with a fragile
+runtime hack baked in.
+
+**Output.** Full result table in `docs/loading_spike.md`. Raw log in
+`logs/loading_spike.log`.
+
+**Decision pending.** Confirm 2b download (prior: `vjepa2_1_vit_base_384`,
+~300 MB) before writing loader code in Task 3. Also: pick (1) vs (2) for the
+`src/` shadowing fix.

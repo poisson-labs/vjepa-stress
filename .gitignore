@@ -32,3 +32,4 @@ dist/
 
 # RunPod
 .runpod/
+logs/

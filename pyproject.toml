@@ -25,6 +25,11 @@ dependencies = [
     "torch>=2.4",
     "transformers>=4.55",
     "accelerate>=0.30",
+    # Required by facebookresearch/vjepa2 hubconf — torch.hub.load(...) imports
+    # both during model construction. Pinning floors here so a fresh editable
+    # install has them.
+    "timm>=1.0",
+    "einops>=0.8",
     "opencv-python-headless>=4.10",
     "decord>=0.6 ; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "numpy<2",
