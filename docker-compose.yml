@@ -1,0 +1,29 @@
+services:
+  vjepa-stress:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vjepa-stress:latest
+    container_name: vjepa-stress
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ./data:/workspace/data
+      - ./checkpoints:/workspace/checkpoints
+      - hf-cache:/workspace/.cache/huggingface
+    environment:
+      - PYTHONPATH=/workspace
+      - HF_HOME=/workspace/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    tty: true
+    stdin_open: true
+    command: bash
+
+volumes:
+  hf-cache:

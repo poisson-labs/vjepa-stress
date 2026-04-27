@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vjepa-stress"
+version = "0.1.0"
+description = "Frozen-encoder feature-stability sweep for V-JEPA 2.1 under controlled perturbations."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Taylor Kolasinski", email = "taylor@flowmode.co" },
+]
+keywords = ["v-jepa", "robustness", "video", "self-supervised", "representation"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.4",
+    "transformers>=4.55",
+    "accelerate>=0.30",
+    "opencv-python-headless>=4.10",
+    "decord>=0.6 ; sys_platform != 'darwin' or platform_machine != 'arm64'",
+    "numpy<2",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    "duckdb>=1.0",
+    "tqdm>=4.66",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/poisson-labs/vjepa-stress"
+Issues   = "https://github.com/poisson-labs/vjepa-stress/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["notebooks", "data", "checkpoints"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802"]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

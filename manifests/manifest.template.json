@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "created_at": null,
+  "seeds": {
+    "video_selection": null,
+    "perturbation": null,
+    "frame_sampling": null
+  },
+  "model_revisions": {
+    "vjepa-2.1-vit-b": null,
+    "vjepa-2.1-vit-l": null,
+    "vjepa-2.1-vit-g": null,
+    "vjepa-2.1-vit-G": null
+  },
+  "dataset_versions": {
+    "ssv2": {
+      "split": null,
+      "file_hash_sha256": null,
+      "video_count": null
+    },
+    "davis": {
+      "split": null,
+      "file_hash_sha256": null,
+      "video_count": null
+    }
+  },
+  "library_versions": {
+    "torch": null,
+    "transformers": null,
+    "accelerate": null,
+    "opencv-python-headless": null,
+    "decord": null,
+    "numpy": null,
+    "pandas": null,
+    "pyarrow": null,
+    "duckdb": null
+  },
+  "video_ids": {
+    "ssv2": [],
+    "davis": []
+  },
+  "hardware": {
+    "platform": null,
+    "gpu": null,
+    "cuda": null,
+    "driver": null
+  },
+  "git": {
+    "commit": null,
+    "dirty": null
+  }
+}
