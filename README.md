@@ -14,6 +14,8 @@ correlates with robustness once the encoder is held fixed.
   matrix, and the pre-registered predictions.
 - [`manifests/predictions.md`](manifests/predictions.md) — pre-registered
   hypotheses, recorded before any sweep is run.
+- [`devlog.md`](devlog.md) — append-only log of milestones and design
+  decisions. Updated as work progresses.
 - `src/` — perturbations, metrics, sweep harness, model loaders.
 - `scripts/` — Stage 0 verification, RunPod pilot, full sweep entry point.
 - `tests/` — unit tests for perturbation contract and metric sanity.
