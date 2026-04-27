@@ -90,7 +90,7 @@ def test_empty_matrix_writes_manifest_and_no_shards(tmp_path: Path):
 
 def test_single_cell_writes_one_shard_with_n_video_rows(tmp_path: Path):
     cell = Cell(
-        model="vjepa-2.1-vit-b",
+        model="vjepa-2.1-vit-base",
         perturbation="gaussian_noise",
         strength=0.5,
         tier=1,
@@ -113,7 +113,7 @@ def test_single_cell_writes_one_shard_with_n_video_rows(tmp_path: Path):
 
 def test_identity_probe_yields_zero_metrics(tmp_path: Path):
     cell = Cell(
-        model="vjepa-2.1-vit-b",
+        model="vjepa-2.1-vit-base",
         perturbation="identity",
         strength=1.0,
         tier=2,
@@ -130,8 +130,8 @@ def test_identity_probe_yields_zero_metrics(tmp_path: Path):
 
 def test_skips_completed_cells_on_resume(tmp_path: Path):
     cells = [
-        Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.1, tier=1),
-        Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.2, tier=1),
+        Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.1, tier=1),
+        Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.2, tier=1),
     ]
 
     log_first: list[str] = []
@@ -156,7 +156,7 @@ def test_skips_completed_cells_on_resume(tmp_path: Path):
 def test_shard_schema_is_locked(tmp_path: Path):
     import pyarrow.parquet as pq
 
-    cell = Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.5, tier=1)
+    cell = Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.5, tier=1)
     config = _make_config(tmp_path, n_videos=2)
     run_sweep(config, cells=[cell])
 
@@ -168,9 +168,9 @@ def test_shard_schema_is_locked(tmp_path: Path):
 
 def test_restart_after_injected_crash(tmp_path: Path):
     cells = [
-        Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.1, tier=1),
-        Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.2, tier=1),
-        Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.3, tier=1),
+        Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.1, tier=1),
+        Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.2, tier=1),
+        Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.3, tier=1),
     ]
 
     crashy = _make_config(
@@ -202,7 +202,7 @@ def test_restart_after_injected_crash(tmp_path: Path):
 
 def test_encoder_loaded_once_per_unique_model(tmp_path: Path):
     cells = []
-    for model in ("vjepa-2.1-vit-b", "vjepa-2.1-vit-l"):
+    for model in ("vjepa-2.1-vit-base", "vjepa-2.1-vit-large"):
         for strength in (0.1, 0.2, 0.3):
             cells.append(Cell(model, "gaussian_noise", strength, tier=1))
 
@@ -211,11 +211,11 @@ def test_encoder_loaded_once_per_unique_model(tmp_path: Path):
     run_sweep(config, cells=cells)
 
     # 6 cells across 2 models — the factory should fire exactly twice.
-    assert log == ["vjepa-2.1-vit-b", "vjepa-2.1-vit-l"]
+    assert log == ["vjepa-2.1-vit-base", "vjepa-2.1-vit-large"]
 
 
 def test_atomic_write_failure_leaves_no_partial_shard(tmp_path: Path):
-    cell = Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.5, tier=1)
+    cell = Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.5, tier=1)
     config = _make_config(tmp_path, n_videos=2)
 
     real_rename = os.rename
@@ -244,7 +244,7 @@ def test_atomic_write_failure_leaves_no_partial_shard(tmp_path: Path):
 
 
 def test_manifest_records_schema_version_and_seeds(tmp_path: Path):
-    cell = Cell("vjepa-2.1-vit-b", "gaussian_noise", 0.1, tier=1)
+    cell = Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.1, tier=1)
     config = _make_config(tmp_path, n_videos=2)
     run_sweep(config, cells=[cell])
 

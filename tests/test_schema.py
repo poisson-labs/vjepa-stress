@@ -22,9 +22,9 @@ from src.sweep.schema import (
 
 def _example_row(**overrides) -> dict:
     base = {
-        "cell_id": "t1__vjepa-2.1-vit-b__gaussian_noise__s0.1000",
+        "cell_id": "t1__vjepa-2.1-vit-base__gaussian_noise__s0.1000",
         "tier": 1,
-        "model": "vjepa-2.1-vit-b",
+        "model": "vjepa-2.1-vit-base",
         "perturbation": "gaussian_noise",
         "strength": 0.1,
         "video_id": "fake_0001",
@@ -97,7 +97,7 @@ def test_full_round_trip_through_duckdb(tmp_path: Path):
         Row(**_example_row(m1=0.0, m2=0.0, m3=float("nan"))),
         Row(
             **_example_row(
-                cell_id="t1__vjepa-2.1-vit-b__gaussian_noise__s0.5000",
+                cell_id="t1__vjepa-2.1-vit-base__gaussian_noise__s0.5000",
                 strength=0.5,
                 m1=0.3,
                 m2=0.2,

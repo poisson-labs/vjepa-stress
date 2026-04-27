@@ -6,7 +6,7 @@ and shard write end-to-end on a single (model, perturbation) slice.
 
 Usage:
     python scripts/pilot_runpod.py \
-        --model vjepa-2.1-vit-l \
+        --model vjepa-2.1-vit-large \
         --perturbation gaussian_noise
 
 If this finishes cleanly, ``run_full_sweep.py`` should be safe to launch.
@@ -23,7 +23,7 @@ from src.sweep.runner import run_sweep
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="vjepa-2.1-vit-l")
+    parser.add_argument("--model", default="vjepa-2.1-vit-large")
     parser.add_argument("--perturbation", default="gaussian_noise")
     parser.add_argument("--config", default=None, help="optional YAML config path")
     args = parser.parse_args()

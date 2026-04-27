@@ -7,8 +7,8 @@
     "frame_sampling": null
   },
   "model_revisions": {
-    "vjepa-2.1-vit-b": null,
-    "vjepa-2.1-vit-l": null,
+    "vjepa-2.1-vit-base": null,
+    "vjepa-2.1-vit-large": null,
     "vjepa-2.1-vit-giant": null,
     "vjepa-2.1-vit-gigantic": null
   },

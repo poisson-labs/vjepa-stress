@@ -17,8 +17,8 @@ import torch
 # Map the variant name used in ``Cell.model`` to its HF repo id. The exact
 # repo paths will land here once V-JEPA 2.1 is released; do not guess them.
 VARIANT_REPOS: dict[str, str] = {
-    "vjepa-2.1-vit-b": "TODO/vjepa-2.1-vit-b",
-    "vjepa-2.1-vit-l": "TODO/vjepa-2.1-vit-l",
+    "vjepa-2.1-vit-base": "TODO/vjepa-2.1-vit-base",
+    "vjepa-2.1-vit-large": "TODO/vjepa-2.1-vit-large",
     "vjepa-2.1-vit-giant": "TODO/vjepa-2.1-vit-giant",
     "vjepa-2.1-vit-gigantic": "TODO/vjepa-2.1-vit-gigantic",
 }

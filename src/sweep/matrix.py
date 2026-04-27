@@ -26,8 +26,8 @@ import numpy as np
 
 #: Variant identifiers; must match keys of ``src.models.vjepa.VARIANT_REPOS``.
 MODELS: tuple[str, ...] = (
-    "vjepa-2.1-vit-b",
-    "vjepa-2.1-vit-l",
+    "vjepa-2.1-vit-base",
+    "vjepa-2.1-vit-large",
     "vjepa-2.1-vit-giant",
     "vjepa-2.1-vit-gigantic",
 )
@@ -46,7 +46,7 @@ TIER2_PROBES: tuple[str, ...] = (
     "horizontal_flip",
 )
 
-TIER3_MODEL: str = "vjepa-2.1-vit-l"
+TIER3_MODEL: str = "vjepa-2.1-vit-large"
 TIER3_PERTURBATIONS: tuple[str, ...] = ("jpeg",)
 
 #: 10 strengths spanning the open interval after 0; strength=0 is covered by

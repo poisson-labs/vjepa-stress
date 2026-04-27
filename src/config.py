@@ -37,7 +37,7 @@ class ModelConfig:
     """V-JEPA 2.1 variant selection and load-time options."""
 
     # HF repo IDs are filled in by the model loader; left as identifiers here.
-    variant: str = "vjepa-2.1-vit-l"
+    variant: str = "vjepa-2.1-vit-large"
     revision: str | None = None  # commit hash, pinned via the manifest
     dtype: str = "float16"  # float16 on GPU, float32 on MPS fallback
     device: str = "auto"  # auto | cuda | mps | cpu

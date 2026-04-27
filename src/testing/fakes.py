@@ -31,8 +31,8 @@ FAKE_PATCHES: int = 16
 #: (768/1024/1408/1792) but distinct across variants so a misrouted load
 #: would surface as a shape mismatch.
 FAKE_EMBED_DIMS: dict[str, int] = {
-    "vjepa-2.1-vit-b": 16,
-    "vjepa-2.1-vit-l": 24,
+    "vjepa-2.1-vit-base": 16,
+    "vjepa-2.1-vit-large": 24,
     "vjepa-2.1-vit-giant": 32,
     "vjepa-2.1-vit-gigantic": 40,
 }
