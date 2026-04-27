@@ -29,14 +29,14 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from src.metrics import compute_m1, compute_m2
-from src.perturbations import Perturbation, all_perturbations
-from src.sweep.checkpoint import (
+from vjepa_stress.metrics import compute_m1, compute_m2
+from vjepa_stress.perturbations import Perturbation, all_perturbations
+from vjepa_stress.sweep.checkpoint import (
     cell_completed,
     cleanup_stale_tmp,
     write_shard,
 )
-from src.sweep.manifest import (
+from vjepa_stress.sweep.manifest import (
     Manifest,
     build_manifest,
     lookup_seed,
@@ -44,8 +44,8 @@ from src.sweep.manifest import (
     read_manifest,
     write_manifest,
 )
-from src.sweep.matrix import Cell
-from src.sweep.schema import SCHEMA_VERSION, Row
+from vjepa_stress.sweep.matrix import Cell
+from vjepa_stress.sweep.schema import SCHEMA_VERSION, Row
 
 logger = logging.getLogger(__name__)
 

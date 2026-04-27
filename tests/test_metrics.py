@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import torch
 
-from src.metrics import compute_m1, compute_m2, compute_m3
+from vjepa_stress.metrics import compute_m1, compute_m2, compute_m3
 
 
 def _features(t: int = 8, p: int = 16, d: int = 32) -> torch.Tensor:

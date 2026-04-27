@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.perturbations.base import Perturbation
+from vjepa_stress.perturbations.base import Perturbation
 
 
 class Identity(Perturbation):

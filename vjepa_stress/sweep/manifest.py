@@ -29,7 +29,7 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
 
-from src.sweep.schema import SCHEMA_VERSION
+from vjepa_stress.sweep.schema import SCHEMA_VERSION
 
 #: Libraries whose version is recorded in every manifest. Missing libraries
 #: are recorded as ``"missing"`` rather than failing the run.

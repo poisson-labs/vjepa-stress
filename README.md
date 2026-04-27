@@ -16,7 +16,7 @@ correlates with robustness once the encoder is held fixed.
   hypotheses, recorded before any sweep is run.
 - [`devlog.md`](devlog.md) — append-only log of milestones and design
   decisions. Updated as work progresses.
-- `src/` — perturbations, metrics, sweep harness, model loaders.
+- `vjepa_stress/` — perturbations, metrics, sweep harness, model loaders.
 - `scripts/` — Stage 0 verification, RunPod pilot, full sweep entry point.
 - `tests/` — unit tests for perturbation contract and metric sanity.
 
@@ -48,7 +48,7 @@ python scripts/verify_perturbations.py
 python scripts/verify_metrics.py
 
 # Sanity-check the experiment matrix
-python -m src.sweep.matrix
+python -m vjepa_stress.sweep.matrix
 
 # Run the test suite (M1/M2 tests fail until Stage 0 lands; that's expected)
 pytest tests/

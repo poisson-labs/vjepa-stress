@@ -50,7 +50,7 @@ Homepage = "https://github.com/poisson-labs/vjepa-stress"
 Issues   = "https://github.com/poisson-labs/vjepa-stress/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["vjepa_stress"]
 
 [tool.ruff]
 line-length = 100

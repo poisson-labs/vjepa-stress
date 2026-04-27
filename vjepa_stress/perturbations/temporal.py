@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.perturbations.base import Perturbation
+from vjepa_stress.perturbations.base import Perturbation
 
 
 # At strength=1 we drop half the frames in expectation; capped so the clip

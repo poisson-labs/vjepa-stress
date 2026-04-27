@@ -10,7 +10,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from src.perturbations.base import Perturbation
+from vjepa_stress.perturbations.base import Perturbation
 
 
 # JPEG quality at strength=0 vs strength=1. ``95`` is visually lossless;

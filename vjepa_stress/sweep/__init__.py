@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.sweep.matrix import Cell, build_experiment_matrix
-from src.sweep.runner import CrashInjected, RunnerConfig, RunSummary, run_sweep
-from src.sweep.schema import SCHEMA_VERSION, Row
+from vjepa_stress.sweep.matrix import Cell, build_experiment_matrix
+from vjepa_stress.sweep.runner import CrashInjected, RunnerConfig, RunSummary, run_sweep
+from vjepa_stress.sweep.schema import SCHEMA_VERSION, Row
 
 __all__ = [
     "Cell",

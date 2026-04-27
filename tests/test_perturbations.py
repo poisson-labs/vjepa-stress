@@ -1,7 +1,7 @@
 """Contract tests for the perturbation API.
 
 These tests run with no model weights and no GPU. They verify the contract
-documented in ``src/perturbations/base.py``: ``strength=0`` is identity,
+documented in ``vjepa_stress/perturbations/base.py``: ``strength=0`` is identity,
 shape and dtype are preserved at every strength, and the calibration
 probes (Identity, Reverse, HorizontalFlip) behave as advertised.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.perturbations import (
+from vjepa_stress.perturbations import (
     FrameDrops,
     GaussianNoise,
     HorizontalFlip,

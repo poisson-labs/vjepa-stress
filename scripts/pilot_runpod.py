@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import argparse
 
-from src.config import SweepConfig
-from src.sweep.matrix import STRENGTHS, Cell
-from src.sweep.runner import run_sweep
+from vjepa_stress.config import SweepConfig
+from vjepa_stress.sweep.matrix import STRENGTHS, Cell
+from vjepa_stress.sweep.runner import run_sweep
 
 
 def main() -> int:

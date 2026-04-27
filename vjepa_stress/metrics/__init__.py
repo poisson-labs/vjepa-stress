@@ -12,8 +12,8 @@ See RESEARCH.md §3 for definitions:
 
 from __future__ import annotations
 
-from src.metrics.m1_drift import compute_m1
-from src.metrics.m2_temporal import compute_m2
-from src.metrics.m3_correspondence import compute_m3
+from vjepa_stress.metrics.m1_drift import compute_m1
+from vjepa_stress.metrics.m2_temporal import compute_m2
+from vjepa_stress.metrics.m3_correspondence import compute_m3
 
 __all__ = ["compute_m1", "compute_m2", "compute_m3"]

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-#: Variant identifiers; must match keys of ``src.models.vjepa.VARIANT_REPOS``.
+#: Variant identifiers; must match keys of ``vjepa_stress.models.vjepa.VARIANT_REPOS``.
 MODELS: tuple[str, ...] = (
     "vjepa-2.1-vit-base",
     "vjepa-2.1-vit-large",

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import argparse
 
-from src.config import SweepConfig
+from vjepa_stress.config import SweepConfig
 
-# TODO Stage 4: wire to ``src.sweep.runner.run_sweep`` once the runner and
+# TODO Stage 4: wire to ``vjepa_stress.sweep.runner.run_sweep`` once the runner and
 # its dependencies (data loaders, model loaders, metrics) are implemented.
 # Until then, this script is a stub so that the entry point exists in the
 # repo from day one.
@@ -31,7 +31,7 @@ def main() -> int:
 
     _ = SweepConfig.from_yaml(args.config)
     if args.dry_run:
-        from src.sweep.matrix import build_experiment_matrix
+        from vjepa_stress.sweep.matrix import build_experiment_matrix
 
         cells = build_experiment_matrix()
         print(f"Would run {len(cells)} cells.")

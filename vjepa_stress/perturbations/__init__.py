@@ -18,12 +18,12 @@ that ``strength=0`` returns the input unchanged.
 
 from __future__ import annotations
 
-from src.perturbations.base import Perturbation
-from src.perturbations.codec import JPEGCompression
-from src.perturbations.identity import Identity
-from src.perturbations.sensor import GaussianNoise, LowLight, MotionBlur
-from src.perturbations.spatial import HorizontalFlip, Occlusion
-from src.perturbations.temporal import FrameDrops, Reverse
+from vjepa_stress.perturbations.base import Perturbation
+from vjepa_stress.perturbations.codec import JPEGCompression
+from vjepa_stress.perturbations.identity import Identity
+from vjepa_stress.perturbations.sensor import GaussianNoise, LowLight, MotionBlur
+from vjepa_stress.perturbations.spatial import HorizontalFlip, Occlusion
+from vjepa_stress.perturbations.temporal import FrameDrops, Reverse
 
 
 def all_perturbations() -> list[Perturbation]:

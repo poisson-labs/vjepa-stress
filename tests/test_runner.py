@@ -19,16 +19,16 @@ from unittest import mock
 
 import pytest
 
-from src.sweep.checkpoint import cell_completed, load_shards, shard_path
-from src.sweep.manifest import manifest_exists, read_manifest
-from src.sweep.matrix import Cell
-from src.sweep.runner import (
+from vjepa_stress.sweep.checkpoint import cell_completed, load_shards, shard_path
+from vjepa_stress.sweep.manifest import manifest_exists, read_manifest
+from vjepa_stress.sweep.matrix import Cell
+from vjepa_stress.sweep.runner import (
     CrashInjected,
     RunnerConfig,
     run_sweep,
 )
-from src.sweep.schema import ARROW_SCHEMA, SCHEMA_VERSION
-from src.testing.fakes import FakeEncoder, FakeVideoDataset
+from vjepa_stress.sweep.schema import ARROW_SCHEMA, SCHEMA_VERSION
+from vjepa_stress.testing.fakes import FakeEncoder, FakeVideoDataset
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ def test_atomic_write_failure_leaves_no_partial_shard(tmp_path: Path):
             raise OSError("simulated rename failure")
         return real_rename(src, dst, *args, **kwargs)
 
-    with mock.patch("src.sweep.checkpoint.os.rename", side_effect=boom):
+    with mock.patch("vjepa_stress.sweep.checkpoint.os.rename", side_effect=boom):
         with pytest.raises(OSError, match="simulated rename failure"):
             run_sweep(config, cells=[cell])
 

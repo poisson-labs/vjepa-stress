@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import torch
 
-from src.metrics import compute_m1, compute_m2
+from vjepa_stress.metrics import compute_m1, compute_m2
 
 
 def make_synthetic_features(t: int = 16, p: int = 196, d: int = 768) -> torch.Tensor:

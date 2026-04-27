@@ -6,7 +6,7 @@ are written atomically: data goes to ``{cell_id}.parquet.tmp``, fsync'd,
 and renamed into place. A crash mid-write therefore leaves no
 half-written shard that ``cell_completed`` would mistake for done.
 
-The shard schema is locked by ``src.sweep.schema.ARROW_SCHEMA``. Reads
+The shard schema is locked by ``vjepa_stress.sweep.schema.ARROW_SCHEMA``. Reads
 go through ``load_shards`` which returns a DuckDB relation so callers
 can run analytical queries without materializing the full table.
 """
@@ -20,8 +20,8 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.sweep.matrix import Cell
-from src.sweep.schema import ARROW_SCHEMA, Row, rows_to_arrow_table
+from vjepa_stress.sweep.matrix import Cell
+from vjepa_stress.sweep.schema import ARROW_SCHEMA, Row, rows_to_arrow_table
 
 
 def shard_path(output_dir: Path, cell: Cell) -> Path:

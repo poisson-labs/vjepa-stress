@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.perturbations import all_perturbations
+from vjepa_stress.perturbations import all_perturbations
 
 
 def make_synthetic_clip(num_frames: int = 16, size: int = 128) -> np.ndarray:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from src.perturbations.base import Perturbation
+from vjepa_stress.perturbations.base import Perturbation
 
 
 # Strength=1 endpoints. Hand-picked to span "still recoverable" (s ~ 0.3)

@@ -14,7 +14,7 @@ WORKDIR /workspace
 
 # Install project dependencies first so layer caches independently of source.
 COPY pyproject.toml README.md /workspace/
-COPY src /workspace/src
+COPY vjepa_stress /workspace/vjepa_stress
 RUN pip install --upgrade pip \
     && pip install -e ".[dev]"
 

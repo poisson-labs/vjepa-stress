@@ -2,11 +2,11 @@
 
 Run with the fake encoder + fake dataset for development:
 
-    python -m src.run_sweep --matrix tier2 --output /tmp/test_shards/ --fake
+    python -m vjepa_stress.run_sweep --matrix tier2 --output /tmp/test_shards/ --fake
 
 Or against a saved JSON list of cells (useful for pilot subsets):
 
-    python -m src.run_sweep --matrix path/to/cells.json --output ... --fake
+    python -m vjepa_stress.run_sweep --matrix path/to/cells.json --output ... --fake
 
 Real V-JEPA + SSv2/DAVIS factories arrive in Stage 0.6.
 """
@@ -19,9 +19,9 @@ import logging
 import sys
 from pathlib import Path
 
-from src.sweep.matrix import Cell, build_experiment_matrix
-from src.sweep.runner import RunnerConfig, run_sweep
-from src.testing.fakes import FakeEncoder, fake_dataset_factory
+from vjepa_stress.sweep.matrix import Cell, build_experiment_matrix
+from vjepa_stress.sweep.runner import RunnerConfig, run_sweep
+from vjepa_stress.testing.fakes import FakeEncoder, fake_dataset_factory
 
 
 def _load_cells_from_json(path: Path) -> list[Cell]:

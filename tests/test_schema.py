@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
 
-from src.sweep.schema import (
+from vjepa_stress.sweep.schema import (
     ARROW_SCHEMA,
     COLUMNS,
     SCHEMA_VERSION,

@@ -6,7 +6,7 @@ The 222-cell total is part of the pre-registration; if it changes,
 
 from __future__ import annotations
 
-from src.sweep.matrix import build_experiment_matrix
+from vjepa_stress.sweep.matrix import build_experiment_matrix
 
 
 def test_matrix_has_222_cells():

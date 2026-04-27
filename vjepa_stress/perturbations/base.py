@@ -31,7 +31,7 @@ class Perturbation(ABC):
     name: str
 
     #: Experiment tier this perturbation belongs to (1, 2, or 3 — see
-    #: ``src.sweep.matrix``).
+    #: ``vjepa_stress.sweep.matrix``).
     tier: int
 
     @abstractmethod
