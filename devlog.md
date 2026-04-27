@@ -284,3 +284,90 @@ default loader on `darwin`; `decord` stays gated behind the existing
 in `EXPERIMENT.md` when that doc is filled in.
 
 ---
+
+## 2026-04-27 — Stage 0.6 Task 2: V-JEPA 2.1 loading spike
+
+**Commits:** `0ddf76c Rename src/ → vjepa_stress/`, `b4dfc6f Stage 0.6
+Task 2: V-JEPA 2.1 loading spike — torch.hub primary`.
+
+### Headline
+
+D1 (loading mechanism) and D2 (resolution) are both pinned. Stage 0.6
+loader will use `torch.hub.load('facebookresearch/vjepa2', ...)` at
+384×384, with a one-line monkey-patch of `VJEPA_BASE_URL` because
+Meta's hub repo ships with `http://localhost:8300` hardcoded as the
+download URL. Full forward-pass contract captured in
+`docs/loading_spike.md`.
+
+### Structural fix: `src/` → `vjepa_stress/`
+
+The first spike run crashed with `ModuleNotFoundError: No module named
+'src.hub'`. Root cause: `facebookresearch/vjepa2` ships its own
+top-level `src/` package (with `src/hub/...` for the hubconf entries),
+and when `torch.hub.load(...)` clones the repo and adds the clone dir
+to `sys.path`, Python resolved `src` to *our* package — which has no
+`hub` submodule. Any future hub clone with a colliding top-level name
+would have hit the same wall.
+
+Fix: renamed the project package `src/` → `vjepa_stress/`. Mechanical
+git mv + import find-replace across .py files; pyproject `packages` and
+the Dockerfile `COPY` both updated. 87 → 91 tests still green (4 new in
+`test_hub_isolation.py`). Single atomic commit so it can be reverted if
+something regresses.
+
+The defence-in-depth helper `vjepa_stress.utils.hub_isolation
+.isolate_for_torch_hub()` is preserved as a context manager. Even with
+`vjepa_stress` as the package name, future contributors should wrap any
+`torch.hub.load()` in it — the next colliding repo we touch (Sentry,
+Argus, anywhere) will be guarded by the same import-time scrub.
+
+### Findings
+
+| Mechanism | Outcome |
+|-----------|---------|
+| HF Hub | 0 V-JEPA 2.1 models published. 10 V-JEPA 2.0 fine-tunes only. Not a viable path. |
+| torch.hub | All four 2.1 entries listed (`vjepa2_1_vit_{base,large,giant,gigantic}_384`). After URL fix, `vit-base` downloads in 19.5 s on Mac M4 and forwards a `(1, 3, 2, 384, 384)` clip to `(1, 576, 768)` float32 in 0.12 s. **Primary mechanism.** |
+| Direct fbaipublicfiles | All four `.pt` files reachable. Filenames had to be recovered from the cached hub repo's `ARCH_NAME_MAP` — they're `vjepa2_1_vitb_dist_vitG_384.pt` (1.55 GB, base, distilled), `vjepa2_1_vitl_dist_vitG_384.pt` (4.80 GB, large, distilled), `vjepa2_1_vitg_384.pt` (15.7 GB, giant native), `vjepa2_1_vitG_384.pt` (28.2 GB, gigantic native). Useful as a loader fallback. |
+
+### Tubelet flag for Task 3
+
+The encoder uses `tubelet_size=2` by default — two consecutive frames
+collapse into a single token row. Output is `(B, T_tubelet × 576, D)`.
+Our M2 metric assumes per-frame deltas `δ_t = F_{t+1} - F_t`; this
+either becomes per-tubelet deltas (cleanest, halves T) or we override
+the kwarg if the entrypoint accepts it (unverified). Decision deferred
+to Task 3 — flagging here so it doesn't get lost.
+
+### Constraint: pyproject deps
+
+`facebookresearch/vjepa2`'s hubconf raises `RuntimeError: Missing
+dependencies: timm, einops` if either is absent. Both added to
+`[project.dependencies]`. They're transitive; we shouldn't be calling
+either directly.
+
+### `STAGE_0.6_TASKS.md` drift
+
+The Stage 0.6 task ledger at `docs/STAGE_0.6_TASKS.md` was written
+before the rename and still references `src/perturbations/`,
+`src/models/vjepa.py`, etc. Substitute `vjepa_stress/...` everywhere
+when reading. Not editing the ledger mid-execution to keep the audit
+trail clean — Task 1's "Files in scope" lines should be read as
+historical pointers, not authoritative paths.
+
+### Next
+
+Task 3 (encoder loader) starts here:
+- Implement `_load_via_hub(variant)` in `vjepa_stress/models/vjepa.py`:
+  isolate, monkey-patch `VJEPA_BASE_URL`, `torch.hub.load`, return
+  `(encoder, predictor)[0]`.
+- Define an `Encoder` Protocol so `FakeEncoder` and the real loader are
+  interchangeable in `RunnerConfig.encoder_factory`.
+- Wire `try_forward_pass` so OOM on giant/gigantic surfaces at load
+  time, not deep in the sweep.
+- 4 unit tests; CI runs `vit-base` only (per the ledger).
+
+Larger variants (large, giant, gigantic) deliberately *not* downloaded
+to the M4 — RunPod is where their forward passes actually need to run
+on a real GPU. Task 3 must work on `vit-base` end-to-end before we move.
+
+---
