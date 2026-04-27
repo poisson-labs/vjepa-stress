@@ -224,3 +224,63 @@ videos) writes 400 rows in ~0.4 s on the M4 dev box.
 - Wire `compute_m3` into the runner once DAVIS masks are loadable.
 
 ---
+
+## 2026-04-27 — Variant naming corrected to match Meta's torch.hub entries
+
+**Commit:** _stage 0.5 follow-up_
+
+**Supersedes** the earlier Stage 0.5 entry on the `vit-G` → `vit-giant`
+rename. That rename was wrong: it collided with the canonical name
+Meta uses for the **1 B** model, and the parameter counts in the
+prior entry were also wrong (the 2 B model was reported as 8 B).
+
+**What's actually canonical.** Meta's `facebookresearch/vjepa2`
+torch.hub registry exposes the V-JEPA 2.1 variants under these names:
+
+| Paper | Params | torch.hub entry           | Our `Cell.model`        |
+|-------|--------|---------------------------|-------------------------|
+| ViT-B | 80 M   | `vjepa2_1_vit_base_384`   | `vjepa-2.1-vit-b`       |
+| ViT-L | 300 M  | `vjepa2_1_vit_large_384`  | `vjepa-2.1-vit-l`       |
+| ViT-g | 1 B    | `vjepa2_1_vit_giant_384`  | `vjepa-2.1-vit-giant`   |
+| ViT-G | 2 B    | `vjepa2_1_vit_gigantic_384` | `vjepa-2.1-vit-gigantic` |
+
+`giant` = lowercase-g = 1 B; `gigantic` = uppercase-G = 2 B. Meta
+solved the case-insensitive-filesystem problem by spelling the words
+out, and we should match that spelling exactly so a future loader can
+build torch.hub entries by string rule (`f"vjepa2_1_vit_{suffix}_384"`)
+without a case-juggling lookup.
+
+**Renames applied** (in `matrix.py`, `fakes.py`, `models/vjepa.py`,
+`manifests/manifest.template.json`):
+
+- `vjepa-2.1-vit-g` → `vjepa-2.1-vit-giant` (1 B)
+- `vjepa-2.1-vit-giant` → `vjepa-2.1-vit-gigantic` (2 B)
+
+The B/L identifiers are left as `vit-b`/`vit-l` for now; switching
+those to `vit-base`/`vit-large` would match Meta's spelling end-to-end
+but is bigger than the bug-fix that motivated this entry. **Open
+question for Stage 0.6:** when we wire the real loader, decide whether
+to harmonize the small/medium identifiers too. If yes, add a
+superseding devlog entry then.
+
+**Open question for Stage 0.6 (HF availability).** As of 2026-03-20,
+V-JEPA 2.1 weights are **not yet on Hugging Face**; the integration
+request is open and unfulfilled. Meta distributes the weights via
+`torch.hub.load('facebookresearch/vjepa2', ...)`. This means:
+
+- `src/models/vjepa.py` should not assume
+  `transformers.AutoModel.from_pretrained(...)` will work; the
+  `VARIANT_REPOS` table currently uses HF-style placeholders (`TODO/...`)
+  that may need to become torch.hub entry strings instead.
+- The first Stage 0.6 task should be a verification spike: pull one
+  variant via torch.hub in the venv on the M4 dev box and confirm
+  weights actually load. That spike decides the loader contract.
+
+**macOS/decord note.** Meta's repo states V-JEPA 2 (and so 2.1) ties
+to `decord`, which has no macOS build. The OpenCV decode path from
+`vl-jepa-repro` Phase 7 is the proven workaround and should be the
+default loader on `darwin`; `decord` stays gated behind the existing
+`sys_platform != 'darwin'` marker in `pyproject.toml`. Document this
+in `EXPERIMENT.md` when that doc is filled in.
+
+---

@@ -33,8 +33,8 @@ FAKE_PATCHES: int = 16
 FAKE_EMBED_DIMS: dict[str, int] = {
     "vjepa-2.1-vit-b": 16,
     "vjepa-2.1-vit-l": 24,
-    "vjepa-2.1-vit-g": 32,
-    "vjepa-2.1-vit-giant": 40,
+    "vjepa-2.1-vit-giant": 32,
+    "vjepa-2.1-vit-gigantic": 40,
 }
 
 
