@@ -25,9 +25,19 @@ implementation) is the next task.
 
 ## Quickstart
 
+Always work inside a project-local virtualenv at `.venv/` — it isolates the
+heavy ML deps (torch, transformers) from your system Python and is gitignored
+by default. Activate before running any script.
+
 ```bash
-# Install (editable, with dev deps)
+# One-time: create the venv and install the package in editable mode
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -e ".[dev]"
+
+# Per-shell: re-activate the venv
+source .venv/bin/activate
 
 # Verify the perturbation pipeline on a sample clip
 python scripts/verify_perturbations.py
@@ -37,6 +47,9 @@ python scripts/verify_metrics.py
 
 # Sanity-check the experiment matrix
 python -m src.sweep.matrix
+
+# Run the test suite (M1/M2 tests fail until Stage 0 lands; that's expected)
+pytest tests/
 ```
 
 ## Reproducing
