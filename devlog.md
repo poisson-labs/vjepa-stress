@@ -629,3 +629,149 @@ clean A/B for that.
   ~0.10 vs. ~1.14 discrepancy noted in the Task 3.5 entry.
 
 ---
+
+## 2026-04-27 — Stage 0.6 Task 5: DAVIS 2017 loader
+
+### Surface
+
+`vjepa_stress/data/davis.py` replaces the Stage 0 placeholder:
+
+- `DAVISSample(sequence_id, frames, masks)` with a `video_id` alias
+  on `sequence_id` so the runner sees the same `.video_id` accessor
+  as `FakeVideo` and `SSv2Sample`. `frames: (T, R, R, 3) uint8 RGB`,
+  `masks: (T, R, R) int32` (0 = background, ≥1 = instance ID).
+- `DAVISDataset(*, root, sequence_ids, num_frames=16, image_size=384)`
+  exposes `video_ids() / sequence_ids() / __len__ / __iter__ /
+  __getitem__`. Decoding happens lazily in `__getitem__` rather than
+  at construction time — DAVIS is small (~1 GB) but we still don't
+  want to materialise 30 sequences × 16 frames × 384² as soon as the
+  dataset object exists.
+- `load_davis_dataset(*, split="val", cache_dir=None, num_frames=16,
+  image_size=384, sequence_ids=None) -> DAVISDataset` factory.
+
+### Cache resolution + inner-DAVIS unwrap
+
+Same priority order as SSv2 (arg → `$VJEPA_STRESS_DAVIS_DIR` →
+`~/data/davis/`). DAVIS's official zip extracts to a directory tree
+that includes an inner `DAVIS/` directory; the loader detects that
+case and unwraps it, so users who unzip with the default settings
+don't have to flatten the tree by hand. Both layouts work:
+
+```
+~/data/davis/JPEGImages/...                # already unwrapped
+~/data/davis/DAVIS/JPEGImages/...          # default unzip layout
+```
+
+### Sequence list
+
+Reads `ImageSets/2017/<split>.txt` first (the canonical DAVIS list,
+30 entries for `val`). Falls back to a directory listing of
+`JPEGImages/480p/` if the ImageSets file is missing — some
+re-distributions strip the meta files, and we'd rather succeed
+loudly with a deterministic order than fail mysteriously. An
+explicit `sequence_ids=` override skips both, which is mostly a test
+ergonomics affordance.
+
+### Mask decoding — the load-bearing detail
+
+DAVIS PNG masks are *paletted* PNGs (PIL mode "P"): each pixel byte
+is a palette index, and the palette table maps that index to an RGB
+colour for visualisation. **`cv2.imread` decodes the palette and
+returns RGB**, which silently destroys the integer instance IDs that
+M3 needs.
+
+The loader uses PIL specifically because `np.array(Image.open(p))`
+on a mode-"P" PNG returns the palette indices unchanged. There's a
+defensive convert-to-grayscale path for re-saved RGB masks (a
+well-meaning preprocessor might emit those), and a 2-D shape check
+that surfaces the error early if the cache file is malformed.
+
+This mistake is exactly the sort of thing that produces silently
+garbage M3 numbers in production and is hard to debug from the
+metric output. `test_mask_values_are_integers` pins it: the
+synthetic fixture writes IDs 1 (left) and 2 (right) and the test
+asserts both survive decode + resize unchanged, with no spurious
+RGB-derived values.
+
+### Resize geometry
+
+Frames: short-side resize + center-crop, `INTER_AREA` for
+downsampling and `INTER_LINEAR` for upsampling — same as SSv2.
+
+Masks: same crop-resize geometry, `INTER_NEAREST`. Bilinear or
+area-resize on integer instance IDs would produce non-integer
+values that don't index cleanly. The two helpers are kept side by
+side in `davis.py` rather than shared with SSv2 — a third loader
+will earn the extraction; two doesn't yet.
+
+### Frames and masks share `np.linspace` indices
+
+Per the task spec, the same `np.linspace(0, total-1, num_frames)`
+sample is used for both the JPEG and PNG file lists. M3 keypoints
+in frame `t` correspond to mask annotations in frame `t` only if
+those `t`s pull from the same on-disk indices.
+`test_frame_and_mask_share_index_sample` pins this by writing JPEGs
+that encode their on-disk index in pixel intensity (`value = i*30`),
+then asserting the decoded values match `np.linspace(0, 11, 4)` and
+that all sampled masks still carry both instance IDs. If the two
+indexings ever drift apart, the assert fires.
+
+### Pillow as an explicit dep
+
+Pillow lands transitively via torchvision but the DAVIS loader
+imports it directly. Added `Pillow>=10.0` to `[project.dependencies]`
+so the dep is explicit and pinned to a floor that supports the
+non-deprecated `Image.frombytes("P", ...)` API used by the test
+fixture.
+
+### Tests (12 fast + 2 slow)
+
+`tests/test_davis_loader.py`:
+
+| Test | Marker | What it covers |
+|------|--------|----------------|
+| `test_load_with_missing_cache_dir_raises_with_install_url` | fast | error path 1 |
+| `test_load_with_missing_subdirs_raises_with_install_url` | fast | error path 2 |
+| `test_load_with_empty_sequence_list_raises` | fast | error path 3 |
+| `test_load_unwraps_inner_davis_directory` | fast | inner-DAVIS handling |
+| `test_video_id_is_stable_string` | fast | `video_id` ≡ `sequence_id` |
+| `test_mask_shape_matches_frame_shape` | fast | `(T,R,R,3)` / `(T,R,R)` |
+| `test_mask_values_are_integers` | fast | palette-vs-RGB regression guard |
+| `test_frame_and_mask_share_index_sample` | fast | linspace shared between JPEG & PNG |
+| `test_dataset_iteration_yields_runner_compatible_samples` | fast | runner protocol parity |
+| `test_explicit_sequence_ids_override_imagesets` | fast | `sequence_ids=` override |
+| `test_imagesets_fallback_to_directory_listing` | fast | val.txt-missing fallback |
+| `test_env_var_overrides_default` | fast | `$VJEPA_STRESS_DAVIS_DIR` |
+| `test_load_returns_30_videos_real_davis` | slow + soft-skip | real DAVIS = 30 sequences |
+| `test_load_is_deterministic_real_davis` | slow + soft-skip | real DAVIS stable order |
+
+The synthetic-DAVIS scaffold uses `cv2.imwrite` for JPEGs and
+`PIL.Image.frombytes("P", ...)` + `putpalette(...)` for the
+paletted PNGs — i.e. the test files exercise the exact decode path
+real DAVIS data hits.
+
+### Suite state
+
+| | count |
+|---|---|
+| fast tests | 121 (was 109; +12 in `test_davis_loader.py`) |
+| slow tests | 6 — 2 pass (vit-base load + M2 synthetic-band); 4 soft-skip on this host (no SSv2 / no DAVIS) |
+
+### Next
+
+Stage 0.6 is now code-complete except for the **final integration
+smoke** (`test_real_pipeline_smoke`): one cell, real ViT-base, 2
+SSv2 clips, asserting non-NaN M1/M2 end-to-end. That's a small new
+test file plus a small CLI affordance to run the runner against
+the SSv2 dataset (the current `--fake` flag is the only switch).
+After that, Stage 0.6 closes and we move to Stage 1 (Docker +
+RunPod).
+
+Open thread, deferred for later: M3 wiring needs a tubelet-aware
+mask alignment — V-JEPA collapses 2 input frames to 1 token row, so
+the mask sequence M3 sees needs to align with token rows, not raw
+frames. The DAVIS loader hands back `(16, R, R)` masks; M3 will
+either consume the first frame of each tubelet pair or majority-vote.
+That decision lives in the M3 runner integration, not the loader.
+
+---

@@ -31,6 +31,10 @@ dependencies = [
     "timm>=1.0",
     "einops>=0.8",
     "opencv-python-headless>=4.10",
+    # Pillow lands transitively via torchvision but the DAVIS loader uses it
+    # directly to decode paletted PNG masks (cv2 collapses the palette to
+    # RGB, losing the instance IDs). Pin the floor so the dep is explicit.
+    "Pillow>=10.0",
     "decord>=0.6 ; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "numpy<2",
     "pandas>=2.2",
