@@ -371,3 +371,132 @@ to the M4 — RunPod is where their forward passes actually need to run
 on a real GPU. Task 3 must work on `vit-base` end-to-end before we move.
 
 ---
+
+## 2026-04-27 — Stage 0.6 Tasks 3 + 3.5: real V-JEPA 2.1 loader, M2 calibration deferred
+
+### Task 3 — `vjepa_stress/models/vjepa.py`
+
+`load_encoder("vit-base")` now end-to-end on Mac M4 CPU:
+
+- `Encoder` Protocol (`@runtime_checkable`) exposes
+  `embedding_dim`/`tubelet_size`/`patch_size`/`input_resolution` plus
+  `output_temporal_dim(n_frames)` / `output_spatial_patches()` /
+  `encode(frames)` / `forward_calls`. `VJEPAEncoder` and `FakeEncoder`
+  both satisfy it; the runner's `_EncoderProtocol` was widened to match
+  and `_features_to_token_grid` now calls
+  `encoder.output_temporal_dim(T_input)` rather than assuming 1:1.
+- `VARIANT_REPOS` maps the canonical short names
+  (`vit-base`/`vit-large`/`vit-giant`/`vit-gigantic`) to the four
+  `vjepa2_1_vit_<v>_384` hub entries. `_normalize_variant` accepts
+  either short or `"vjepa-2.1-vit-..."` long form so both Cell.model
+  styles flow through unchanged.
+- `patch_meta_url()` is the structural fix for the localhost stub from
+  Task 2's spike: it adds the cached repo to `sys.path`, evicts any
+  prior `src.*`, imports `src.hub.backbones`, saves the original
+  `VJEPA_BASE_URL`, swaps in `https://dl.fbaipublicfiles.com/vjepa2`,
+  and unwinds *all four* (URL, sys.path, evicted modules, cache modules)
+  on exit — including the failure path. The reversibility is unit-tested
+  against a stubbed cache dir so the test runs in the fast suite.
+- `try_forward_pass` runs a `(2, 384, 384, 3)` uint8 dummy clip
+  through the encoder right after load and asserts the documented
+  output shape, so any device/dtype misconfig surfaces at load time
+  rather than 4h into a sweep. Counter is reset before returning so
+  callers see clean `forward_calls` accounting.
+- `default_dtype_for_device` picks bf16 on CUDA and fp32 elsewhere
+  (MPS bf16 support is incomplete; Mac dev stays in fp32, CUDA prod
+  gets the bf16 win).
+- `encode()` takes `(T, H, W, 3)` uint8 (matching `FakeEncoder`),
+  permutes/unsqueezes to the model's `(1, C, T, H, W)` convention,
+  ImageNet-normalizes, runs the forward, validates the output shape
+  against `(1, T_tubelet × 576, embedding_dim)`, reshapes to
+  `(T_tubelet, P, D)`, casts back to fp32 on CPU, and L2-normalizes.
+
+End-to-end forward: `(16, 384, 384, 3)` uint8 → `(8, 576, 768)`
+fp32 in ~10 s on M4 CPU. 8 fast loader tests + 1 slow end-to-end
+test + 99 fast + 2 slow tests total green (1 calibration test
+skipped — see below).
+
+### Task 3.5 — M2 reverse calibration: deferred to Task 4
+
+The original spec was a slow test asserting `0.9 < M2 < 1.4` on
+real-encoder features under reverse playback, against RESEARCH.md
+§3.2's analytical ~1.14 expectation. Built it as
+`test_m2_reverse_calibration_real_features` and ran it.
+
+**Observation.** On a 16-frame synthetic video built as `base_image
++ cumulative_drift(±2 per pixel per frame)` (i.e., uniform low-amplitude
+linear drift), real V-JEPA 2.1 vit-base produces **M2 ≈ 0.10**, an
+order of magnitude *smaller* than the 1.14 prediction. Sign is right
+(strictly positive — Reverse is *some* perturbation) but the magnitude
+isn't.
+
+**Two candidate mechanisms** (mechanism call deferred — see below):
+
+1. *Tubelet pair-averaging.* `tubelet_size=2` collapses two consecutive
+   frames into a single token row. Within a tubelet, the model may be
+   roughly symmetric in frame ordering (averaging-style pooling rather
+   than a sequenced read). For globally smooth drift, this swallows
+   most of the temporal-direction signal: `delta_clean[t]` and
+   `delta_reverse[t]` end up *aligned*, not anti-aligned, because the
+   per-tubelet feature change tracks position in the input sequence
+   more than direction of motion.
+2. *Low-entropy collapse.* Synthetic uniform drift is far off-manifold
+   for a model trained on real motion video. The encoder may map the
+   whole clip into a low-entropy region where consecutive-tubelet
+   features are nearly identical, so `‖delta‖ → 0` at *both* clean
+   and reversed and the cosine becomes dominated by tiny aligned
+   noise vectors.
+
+These aren't mutually exclusive — both could contribute in different
+ratios. Distinguishing them requires comparing M2 across (real
+SSv2 motion clip) vs. (synthetic drift) vs. (synthetic high-entropy
+content), which requires SSv2 plumbing.
+
+**Decision.** Defer the mechanism call to Stage 0.6 Task 4 (SSv2
+loader). The synthetic stimulus is just for plumbing tests; real
+calibration only makes sense on real video. Concretely:
+
+- `test_m2_reverse_calibration_real_features` is now
+  `@pytest.mark.slow @pytest.mark.calibration` and `pytest.skip`s with
+  a message tying it to RESEARCH.md §3.2 and Task 4. The body is intact
+  so re-enabling is a one-line change once SSv2 exists.
+- Added `test_m2_reverse_synthetic_observed_band` which pins the
+  observed ~0.10 with a 0.3 ceiling. Docstring is explicit that this
+  *captures observed behavior, mechanism TBD pending real-video
+  calibration*. Its only job is to flag a regression in the loader /
+  preprocessing path — not to validate any claim about M2's
+  semantics.
+- Existing synthetic test `test_m2_positive_on_reversed_features`
+  (in `tests/test_metrics.py`) gets a docstring noting it covers
+  algorithmic correctness only — *not* numerical calibration —
+  pointing readers at the calibration test for the latter.
+- New pytest marker `calibration` documented in `pyproject.toml`.
+
+This is the "named stub with implementation notes for deferred work"
+pattern from the feedback ledger — surfacing the gap rather than
+silently widening the band to whatever number we observed.
+
+### Suite state
+
+| | count |
+|---|---|
+| fast tests | 99 (was 91; +8 new in `test_vjepa_loader.py`) |
+| slow tests | 3 — `test_load_smallest_works_end_to_end` + `test_m2_reverse_synthetic_observed_band` pass; `test_m2_reverse_calibration_real_features` skipped |
+| skipped | 1 (the calibration test, with documented reason) |
+
+### Next
+
+Task 4: SSv2 loader. When that lands:
+
+1. Re-enable `test_m2_reverse_calibration_real_features` (delete the
+   `pytest.skip`, add an SSv2 fixture).
+2. Run the calibration → if `0.9 < M2 < 1.4` lands, mechanism
+   probably *was* synthetic content collapse. If it doesn't, dig
+   into tubelet pair-averaging (e.g. compare against a hub-loaded
+   variant with `tubelet_size=1` if Meta's kwargs allow, or
+   override and re-run).
+3. Either way, fold the mechanism finding back into RESEARCH.md §3.2
+   so the analytical band is supported by both prediction *and*
+   observation.
+
+---

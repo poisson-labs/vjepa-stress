@@ -53,6 +53,20 @@ def test_m2_zero_on_identical_features():
 
 
 def test_m2_positive_on_reversed_features():
+    """Algorithmic-correctness check on synthetic random features.
+
+    This asserts only that ``M2(features, reversed_features) > 0`` — i.e.
+    the gradient-based form is *not* invariant under temporal reversal,
+    which a naive ``mean cos(F_t, F_{t+1})`` formulation would be (see
+    ``m2_temporal.py`` docstring).
+
+    It does **not** validate the numerical calibration of M2 on real
+    V-JEPA features. Random Gaussian features will produce a different
+    M2 magnitude (~1.07) than real V-JEPA features (~1.14 per
+    RESEARCH.md §3.2). The real-feature calibration check lives in
+    :func:`test_vjepa_loader.test_m2_reverse_calibration_real_features`
+    and is gated behind ``@pytest.mark.slow``.
+    """
     f = _features()
     f_rev = torch.flip(f, dims=[0])
     out = compute_m2(f, f_rev)

@@ -74,3 +74,7 @@ ignore = ["E501"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+markers = [
+    "slow: tests that download or run V-JEPA 2.1 weights — skip in fast loops, run before commit",
+    "calibration: tests that pin a numerical metric value against a real-data reference — currently skipped pending SSv2 plumbing (Stage 0.6 Task 4)",
+]

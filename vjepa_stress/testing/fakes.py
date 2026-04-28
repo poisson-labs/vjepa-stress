@@ -22,19 +22,26 @@ from typing import Iterator
 import numpy as np
 import torch
 
-#: Token grid is 4x4 = 16 patches. Independent of image size; the real
-#: encoder also returns a fixed-grid token map regardless of the input
-#: resolution it was trained on.
-FAKE_PATCHES: int = 16
+#: Default fake image resolution. Distinct from real V-JEPA's 384 so a
+#: misconfigured loader path surfaces as a shape mismatch in tests.
+FAKE_INPUT_RESOLUTION: int = 32
+
+#: Default fake patch grid side length: 4x4 = 16 patches.
+FAKE_PATCH_SIDE: int = 4
+FAKE_PATCHES: int = FAKE_PATCH_SIDE * FAKE_PATCH_SIDE
 
 #: Embedding dimension per fake model. Smaller than the real V-JEPA dims
-#: (768/1024/1408/1792) but distinct across variants so a misrouted load
+#: (768/1024/1408/1664) but distinct across variants so a misrouted load
 #: would surface as a shape mismatch.
 FAKE_EMBED_DIMS: dict[str, int] = {
     "vjepa-2.1-vit-base": 16,
     "vjepa-2.1-vit-large": 24,
     "vjepa-2.1-vit-giant": 32,
     "vjepa-2.1-vit-gigantic": 40,
+    "vit-base": 16,
+    "vit-large": 24,
+    "vit-giant": 32,
+    "vit-gigantic": 40,
 }
 
 
@@ -66,17 +73,48 @@ class FakeEncoder:
     that the runner reused a single load across all cells of one model.
     """
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        embedding_dim: int | None = None,
+        tubelet_size: int = 1,
+        patch_size: int | None = None,
+        input_resolution: int = FAKE_INPUT_RESOLUTION,
+    ) -> None:
         self.model_name = model_name
-        self.embed_dim = _embed_dim_for(model_name)
-        self.num_patches = FAKE_PATCHES
+        self.embedding_dim = (
+            embedding_dim if embedding_dim is not None else _embed_dim_for(model_name)
+        )
+        # Backwards-compat alias used by older test code.
+        self.embed_dim = self.embedding_dim
+        self.tubelet_size = tubelet_size
+        self.input_resolution = input_resolution
+        # Default patch_size makes the spatial grid = FAKE_PATCH_SIDE on a
+        # FAKE_INPUT_RESOLUTION-pixel image, so num_patches stays at 16.
+        self.patch_size = (
+            patch_size if patch_size is not None else max(1, input_resolution // FAKE_PATCH_SIDE)
+        )
+        self.num_patches = self.output_spatial_patches()
         self._salt = hashlib.blake2b(
             model_name.encode("utf-8"), digest_size=8
         ).digest()
         self.forward_calls: int = 0
 
+    def output_temporal_dim(self, n_frames: int) -> int:
+        if n_frames <= 0 or n_frames % self.tubelet_size != 0:
+            raise ValueError(
+                f"n_frames must be a positive multiple of tubelet_size="
+                f"{self.tubelet_size}; got {n_frames}"
+            )
+        return n_frames // self.tubelet_size
+
+    def output_spatial_patches(self) -> int:
+        side = max(1, self.input_resolution // self.patch_size)
+        return side * side
+
     def encode(self, frames: np.ndarray) -> torch.Tensor:
-        """Encode a clip of shape ``(T, H, W, 3)`` uint8 to ``(T, P, D)`` float32."""
+        """Encode a clip of shape ``(T, H, W, 3)`` uint8 to ``(T_tubelet, P, D)`` float32."""
         if frames.ndim != 4 or frames.shape[-1] != 3 or frames.dtype != np.uint8:
             raise ValueError(
                 f"FakeEncoder.encode expects (T,H,W,3) uint8; got "
@@ -84,12 +122,18 @@ class FakeEncoder:
             )
         self.forward_calls += 1
         t = frames.shape[0]
-        out = torch.empty((t, self.num_patches, self.embed_dim), dtype=torch.float32)
-        for i in range(t):
-            seed = _hash_to_seed(self._salt, frames[i].tobytes())
+        t_out = self.output_temporal_dim(t)
+        out = torch.empty(
+            (t_out, self.num_patches, self.embedding_dim), dtype=torch.float32
+        )
+        # When tubelet_size > 1, hash over each tubelet's worth of frames so
+        # consecutive tubelets get distinct (but deterministic) features.
+        for i in range(t_out):
+            chunk = frames[i * self.tubelet_size : (i + 1) * self.tubelet_size]
+            seed = _hash_to_seed(self._salt, chunk.tobytes())
             g = torch.Generator().manual_seed(seed % (2**31))
             f = torch.randn(
-                self.num_patches, self.embed_dim, generator=g, dtype=torch.float32
+                self.num_patches, self.embedding_dim, generator=g, dtype=torch.float32
             )
             out[i] = torch.nn.functional.normalize(f, dim=-1)
         return out

@@ -55,7 +55,15 @@ class CrashInjected(RuntimeError):
 
 
 class _EncoderProtocol(Protocol):
+    embedding_dim: int
+    tubelet_size: int
+    patch_size: int
+    input_resolution: int
     forward_calls: int
+
+    def output_temporal_dim(self, n_frames: int) -> int: ...
+
+    def output_spatial_patches(self) -> int: ...
 
     def encode(self, frames: np.ndarray) -> torch.Tensor: ...
 
@@ -159,7 +167,12 @@ def _ensure_manifest(
 def _features_to_token_grid(
     features: torch.Tensor, expected_t: int
 ) -> torch.Tensor:
-    """Sanity-check the encoder output shape ``(T, P, D)``."""
+    """Sanity-check the encoder output shape ``(T_tubelet, P, D)``.
+
+    ``expected_t`` is the encoder's *output* temporal dimension after any
+    tubelet collapse, not the raw input frame count. Callers should pass
+    ``encoder.output_temporal_dim(n_frames)``.
+    """
     if features.ndim != 3:
         raise ValueError(
             f"encoder must return (T,P,D); got shape {tuple(features.shape)}"
@@ -183,11 +196,13 @@ def _compute_metrics_for_cell(
     schema stores it as a float, so ``math.nan`` is the right placeholder
     — readers that aggregate M3 will simply ignore those rows.
     """
+    expected_t_clean = encoder.output_temporal_dim(frames_clean.shape[0])
+    expected_t_perturb = encoder.output_temporal_dim(frames_perturbed.shape[0])
     feats_clean = _features_to_token_grid(
-        encoder.encode(frames_clean), expected_t=frames_clean.shape[0]
+        encoder.encode(frames_clean), expected_t=expected_t_clean
     )
     feats_perturbed = _features_to_token_grid(
-        encoder.encode(frames_perturbed), expected_t=frames_perturbed.shape[0]
+        encoder.encode(frames_perturbed), expected_t=expected_t_perturb
     )
 
     m1 = float(compute_m1(feats_clean, feats_perturbed).item())
