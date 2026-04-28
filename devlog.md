@@ -500,3 +500,132 @@ Task 4: SSv2 loader. When that lands:
    observation.
 
 ---
+
+## 2026-04-27 — Stage 0.6 Task 4: SSv2 loader (manual-download, OpenCV decode)
+
+### Surface
+
+`vjepa_stress/data/ssv2.py` replaces the Stage 0 placeholder:
+
+- `SSv2Sample(video_id, frames)` — mirrors `FakeVideo`, so the runner
+  iterates real and fake datasets through the same code path.
+- `SSv2Dataset(*, video_paths, num_frames=16, image_size=384,
+  dataset_name="ssv2")` — implements `video_ids()` / `__len__` /
+  `__iter__` / `__getitem__`, satisfies the runner's `_DatasetProtocol`.
+- `load_ssv2_dataset(*, n_videos=200, seed=0, split="validation",
+  cache_dir=None, num_frames=16, image_size=384,
+  file_patterns=("*.webm", "*.mp4"))` — the user-facing factory.
+
+### Cache resolution
+
+Priority order: explicit `cache_dir=` → `$VJEPA_STRESS_SSV2_DIR` →
+`~/data/ssv2/`. The ergonomic env var is the path of least resistance
+on RunPod where `~/data/...` would point at ephemeral storage; the
+default keeps Mac dev simple.
+
+### Manual-download error path (D3 closed)
+
+D3 (manual-only vs. auto-with-token) is settled: manual-only.
+`load_ssv2_dataset` raises `FileNotFoundError` with the install URL
+(`https://developer.qualcomm.com/software/ai-datasets/something-something`)
+in two cases:
+1. Split dir doesn't exist.
+2. Split dir exists but contains no matching videos.
+
+Both messages include the cache path the loader looked at and remind
+the user about the env-var override. Two unit tests pin the error
+strings — anyone who later swaps the URL or rewrites the message
+will get a flagged test rather than a silently-degraded UX.
+
+### Decode
+
+OpenCV (`cv2.VideoCapture`). decord is gated to non-darwin in
+`pyproject.toml` and we deliberately don't add a darwin shim — same
+code on Mac and on RunPod is more important than the speed bump
+decord buys on Linux for this workload (we're encoder-bound, not
+decode-bound).
+
+Frame indices: `np.linspace(0, total-1, num_frames).round().astype(int)`,
+clamped to `[0, total-1]` because some containers report inflated
+frame counts. Per-frame: `cap.set(POS_FRAMES, idx)` + `read()`,
+BGR→RGB convert, short-side resize + center-crop to `image_size`.
+Resize uses `INTER_AREA` for downsampling and `INTER_LINEAR` for
+upsampling — small thing, but the sweep is cumulative-error-sensitive
+and `INTER_LINEAR` aliases on big downsample factors.
+
+### Sampling
+
+`random.Random(seed).sample(all_paths, n_videos)` then `sorted(...)`.
+Sampling first with the seed, then sorting, is the right order: the
+sample set is a function of `(pool, seed)`, and the sort makes
+iteration deterministic and easy to audit. `n_videos > pool` falls
+back to "use the whole pool" with a logged warning rather than
+raising — synthetic test pools are smaller than 200 and we don't
+want every test that constructs an SSv2 fixture to know about the
+pool size.
+
+### Tests (10 fast + 2 slow + 1 calibration)
+
+`tests/test_ssv2_loader.py`:
+
+| Test | Marker | What it covers |
+|------|--------|----------------|
+| `test_resolve_cache_dir_prefers_explicit_arg` | fast | priority of `cache_dir=` over env |
+| `test_resolve_cache_dir_falls_back_to_env` | fast | env var is honoured |
+| `test_resolve_cache_dir_default` | fast | default is `~/data/ssv2/` |
+| `test_load_with_missing_split_dir_raises_with_install_url` | fast | error path 1 |
+| `test_load_with_empty_split_dir_raises_with_install_url` | fast | error path 2 |
+| `test_resize_and_center_crop_shape_and_aspect` | fast | resize math, both aspect ratios |
+| `test_video_shape_with_synthetic_mp4` | fast | full decode of a writer-generated mp4 → `(16,384,384,3)` uint8 RGB |
+| `test_load_is_deterministic_with_same_seed` | fast | seeded sampling repeats |
+| `test_n_videos_capped_at_pool_size_emits_warning` | fast | small-pool warning path |
+| `test_dataset_iteration_yields_runner_compatible_samples` | fast | runner protocol compatibility |
+| `test_load_returns_correct_count_real_ssv2` | slow + soft-skip | real SSv2 |
+| `test_load_is_deterministic_real_ssv2` | slow + soft-skip | real SSv2 |
+
+The synthetic-mp4 path is the load-bearing one — it exercises the
+full decode pipeline (open, frame seek, BGR→RGB, resize+crop, dtype)
+without needing the gated dataset, so CI on a fresh box catches
+regressions.
+
+### M2 reverse calibration: now soft-skipped, not hard-skipped
+
+`test_m2_reverse_calibration_real_features` is no longer an
+unconditional `pytest.skip`. The body now:
+
+1. Checks `_resolve_cache_dir(None) / "validation"` for SSv2 presence.
+2. If absent → `pytest.skip` with the install URL and a pointer at
+   the synthetic observed-band test.
+3. If present → load one SSv2 clip, encode clean + reverse, assert
+   `0.9 < M2 < 1.4`.
+
+So on a Mac dev box with no SSv2 it still skips, but on RunPod (or
+any host with the env var pointed at a real SSv2 tree) it runs
+without code changes — which is exactly the "named stub with escape
+hatch" pattern the feedback ledger calls for.
+
+`test_m2_reverse_synthetic_observed_band` keeps pinning the ~0.10
+synthetic value with a 0.3 ceiling. Once we observe the real-video
+M2 it'll either confirm the synthetic-collapse hypothesis or send us
+to investigate tubelet pair-averaging — the test pair gives us a
+clean A/B for that.
+
+### Suite state
+
+| | count |
+|---|---|
+| fast tests | 109 (was 99; +10 in `test_ssv2_loader.py`) |
+| slow tests | 4 — vit-base load + M2 synthetic-band pass; 2 SSv2 + 1 M2-calibration soft-skip on Mac (no SSv2) |
+
+### Next
+
+- Task 5: DAVIS loader. Smaller, ungated dataset; same iterable
+  shape but yields `(video_id, frames, masks)` for M3.
+- Final integration smoke (`test_real_pipeline_smoke`) once Task 5
+  lands — one cell, real ViT-base, 2 SSv2 clips, assert non-NaN
+  M1/M2 end-to-end.
+- Once an SSv2 tree is plumbed somewhere we control (RunPod or local
+  manual download), run the M2 calibration test and resolve the
+  ~0.10 vs. ~1.14 discrepancy noted in the Task 3.5 entry.
+
+---

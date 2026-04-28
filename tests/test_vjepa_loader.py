@@ -191,19 +191,48 @@ def test_load_smallest_works_end_to_end():
 def test_m2_reverse_calibration_real_features():
     """Pin the M2(clean, reverse-played) magnitude on real V-JEPA features.
 
-    Skipped until Stage 0.6 Task 4 lands the SSv2 loader. RESEARCH.md
-    §3.2 sets the analytical expectation at ~1.14 for real-encoder
-    reverse playback on real motion video; the band ``0.9 < M2 < 1.4``
-    is calibrated against that reference and only meaningful when the
-    input is real video. Synthetic drift produces a different,
-    much-smaller M2 (see ``test_m2_reverse_synthetic_observed_band``)
-    so we can't substitute it without redefining what the test asserts.
+    RESEARCH.md §3.2 sets the analytical expectation at ~1.14 for
+    real-encoder reverse playback on real motion video; the band
+    ``0.9 < M2 < 1.4`` is calibrated against that reference. Synthetic
+    drift produces a different, much-smaller M2 (~0.10 — see
+    ``test_m2_reverse_synthetic_observed_band``), so this test runs
+    against a real SSv2 clip and soft-skips when none is available.
+
+    Soft-skip (vs. unconditional skip) is intentional: SSv2 is gated
+    and not present on every dev box, but on RunPod / any host with a
+    populated cache dir this is the calibration check that actually
+    validates the metric. Devlog 2026-04-27 has the deferral history.
     """
-    pytest.skip(
-        "M2 reverse calibration requires real motion video; pending Stage 0.6 "
-        "Task 4 (SSv2 loader). RESEARCH.md §3.2 calibrates the 0.9-1.4 band "
-        "against real SSv2 clips, not synthetic drift. Re-enable once "
-        "vjepa_stress.data.ssv2 is wired up."
+    from vjepa_stress.data.ssv2 import (
+        SSV2_INSTALL_URL,
+        _resolve_cache_dir,
+        load_ssv2_dataset,
+    )
+    from vjepa_stress.metrics import compute_m2
+
+    cache_root = _resolve_cache_dir(None)
+    if not (cache_root / "validation").is_dir():
+        pytest.skip(
+            f"No SSv2 tree at {cache_root}; manual download required "
+            f"(see {SSV2_INSTALL_URL}). M2 reverse calibration only runs "
+            f"against real motion video — synthetic stimulus is covered by "
+            f"test_m2_reverse_synthetic_observed_band."
+        )
+
+    ds = load_ssv2_dataset(n_videos=1, seed=0, image_size=384, num_frames=16)
+    sample = next(iter(ds))
+    frames_clean = np.ascontiguousarray(sample.frames)
+    frames_reverse = np.ascontiguousarray(frames_clean[::-1])
+
+    enc = load_encoder("vit-base", device="cpu")
+    feats_clean = enc.encode(frames_clean)
+    feats_reverse = enc.encode(frames_reverse)
+    m2 = float(compute_m2(feats_clean, feats_reverse).item())
+
+    assert 0.9 < m2 < 1.4, (
+        f"M2(clean, reverse) on SSv2 clip {sample.video_id!r} = {m2:.3f}; "
+        f"expected ~1.14 per RESEARCH.md §3.2 (band [0.9, 1.4]). Calibration "
+        f"on real V-JEPA features has drifted."
     )
 
 
