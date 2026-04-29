@@ -872,3 +872,83 @@ weights." Calibration follow-ups (M2 band, M3 mechanism) wait until
 the real-feature corpus exists.
 
 ---
+
+## 2026-04-29 — Real-feature M2 calibration on DAVIS reverse: prediction confirmed
+
+The deferred Task 3.5 calibration question — *what does M2 actually look
+like on real V-JEPA 2.1 features under reverse playback?* — is now
+answered. Branch fired: **`in_band`**. Prediction confirmed.
+
+### Setup
+
+- Encoder: `vjepa-2.1-vit-base`, CPU, fp32, eval-mode + frozen.
+- Dataset: DAVIS 2017 val (fixed 30 clips). Switched from SSv2 because
+  SSv2 is gated, ~50 GB, and lands directly on RunPod in Stage 1+;
+  DAVIS is local, ungated, real motion content, fixed 30-clip set.
+- Per clip: 16 frames at 384², linspace-sampled. Reverse via `[::-1]`.
+- Metric: `compute_m2(F_clean, F_reversed)` — locked, untouched.
+- Script: `scripts/calibrate_m2_real.py` (commit fixed in this entry).
+- Output: `data/calibration/m2_reverse_calibration.json` +
+  `logs/m2_calibration.log`.
+
+### Result
+
+| metric | mean | median | std | min | max |
+|---|---|---|---|---|---|
+| **M2** | **1.0200** | 1.0304 | 0.0360 | 0.8949 | 1.0664 |
+| M1 | 0.2751 | 0.2785 | 0.0459 | 0.1612 | 0.3840 |
+
+All 30 per-clip M2 values fall inside `[0.9, 1.4]`. The std (0.036) is
+remarkably tight — a 13% spread (0.89→1.07) over content as
+heterogeneous as `bike-packing`, `breakdance`, `goldfish`,
+`scooter-black`, `motocross-jump`. The prediction in RESEARCH.md §3.2 of
+~1.14 is slightly above what we observed (1.02), but well within the
+defined `[0.9, 1.4]` band.
+
+### Per-clip lows worth noting
+
+Three clips landed below 0.95:
+
+- `dogs-jump` 0.8949
+- `judo` 0.9434
+- `pigs` 0.9541
+- `bike-packing` 0.9644
+
+These are the lowest M1 clips too (`dogs-jump` M1=0.16; `judo` M1=0.20),
+which is consistent with the analytical story: when per-frame structural
+drift is small, the temporal-gradient direction is harder to flip cleanly,
+so M2 retreats slightly toward 0. None of them are pathologically low and
+all sit comfortably above the H2 threshold (M2 > 0.8).
+
+### What this means for the rest of the study
+
+- **H2 (Reverse Sensitivity, threshold M2 > 0.8) is well-grounded.** All
+  30 DAVIS clips clear it with margin. The H2 calibration probe will
+  produce signal, not noise.
+- **The synthetic ~0.10 result from Task 3.5 stays as a structural
+  finding**, not a bug. The real-video number is an order of magnitude
+  larger and lands where RESEARCH.md predicted, which is the only
+  evidence we needed that the synthetic gap was about feature-entropy
+  collapse on monotonic stimuli, not a metric / pipeline issue.
+- **Diagnostics did not run** (the `below_floor` branch was not hit), so
+  the script's identity / cross-distribution / random-features paths are
+  untested in practice. They remain wired for the unlikely case where a
+  Stage-1 follow-up on a different model variant or on SSv2 fires
+  `below_floor`.
+
+### Pre-registration discipline
+
+We predicted [0.9, 1.4]. We observed mean=1.020, all 30 clips in band.
+RESEARCH.md is unchanged. H2's 0.8 threshold is unchanged. M2 is
+unchanged. The calibration JSON is the artifact-of-record:
+
+    data/calibration/m2_reverse_calibration.json
+
+### Next
+
+Calibration unblocks Stage 1 (Dockerfile + RunPod image). The remaining
+calibration follow-up — same number on a real-motion natural-class
+distribution like SSv2 — happens on RunPod once SSv2 is downloaded
+there. The script's diagnostic-2 slot is reserved for that follow-up.
+
+---

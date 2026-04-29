@@ -1,4 +1,4 @@
-"""Real-feature M2 calibration on SSv2 reverse playback.
+"""Real-feature M2 calibration on DAVIS 2017 reverse playback.
 
 Answers the deferred Stage 0.6 Task 3.5 question: what does M2 actually
 look like on real V-JEPA 2.1 features when a clean clip is compared to
@@ -9,6 +9,12 @@ for 16-frame input at tubelet=2. The synthetic-drift companion test
 pinned ~0.10 — a structural finding (V-JEPA represents monotonic
 synthetic stimuli with reversal-symmetric gradient fields), not a bug —
 and left the real-video calibration question open.
+
+Why DAVIS instead of SSv2 here: DAVIS 2017 val is public, ungated, a
+fixed 30-clip set, and on disk locally for fast iteration. SSv2 is
+~50 GB and gated; that download lands directly on RunPod in Stage 1+,
+not on a dev box. DAVIS gives us a real-motion signal we can iterate
+on right now.
 
 This script is **standalone**. It is not a pytest test: the calibration
 *is* an empirical observation, not an assertion against a predicted
@@ -47,10 +53,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from vjepa_stress.data.ssv2 import (
-    SSV2_INSTALL_URL,
+from vjepa_stress.data.davis import (
+    DAVIS_INSTALL_URL,
     _resolve_cache_dir,
-    load_ssv2_dataset,
+    load_davis_dataset,
 )
 from vjepa_stress.metrics import compute_m1, compute_m2
 from vjepa_stress.models.vjepa import load_encoder
@@ -65,20 +71,23 @@ PREDICTED_BAND: tuple[float, float] = (0.9, 1.4)
 RANDOM_FEATURES_SHAPE: tuple[int, int, int] = (8, 576, 768)
 
 
-def _check_ssv2_present() -> None:
-    """Fail fast with the registration URL if SSv2 isn't on disk yet."""
+def _check_davis_present() -> None:
+    """Fail fast with the install URL if DAVIS isn't on disk yet."""
     root = _resolve_cache_dir(None)
-    if not (root / "validation").is_dir():
+    # The loader unwraps an optional inner ``DAVIS/`` dir, so accept either layout.
+    has_unwrapped = (root / "JPEGImages" / "480p").is_dir()
+    has_inner = (root / "DAVIS" / "JPEGImages" / "480p").is_dir()
+    if not (has_unwrapped or has_inner):
         sys.stderr.write(
-            f"\nERROR: SSv2 validation tree not found at {root / 'validation'}.\n"
+            f"\nERROR: DAVIS 2017 tree not found at {root}.\n"
             f"\n"
-            f"SSv2 is registration-gated and must be downloaded manually:\n"
-            f"  1. Register at {SSV2_INSTALL_URL}\n"
-            f"  2. Download something-something-v2 (~50 GB)\n"
-            f"  3. Extract validation videos to {root}/validation/\n"
+            f"DAVIS is public and ungated; download:\n"
+            f"  curl -L -o DAVIS-2017-trainval-480p.zip "
+            f"https://data.vision.ee.ethz.ch/csergi/share/davis/"
+            f"DAVIS-2017-trainval-480p.zip\n"
+            f"  unzip DAVIS-2017-trainval-480p.zip -d {root}\n"
             f"\n"
-            f"You can also point the loader elsewhere via "
-            f"$VJEPA_STRESS_SSV2_DIR.\n"
+            f"See {DAVIS_INSTALL_URL} for the canonical landing page.\n"
         )
         sys.exit(2)
 
@@ -112,9 +121,9 @@ def _classify(mean_m2: float) -> tuple[str, str]:
     if mean_m2 < 0.5:
         return (
             "below_floor",
-            "Real surprise. Diagnostics auto-run (DAVIS reverse, identity, random "
-            "features). Do NOT modify RESEARCH.md / H2 / M2 here — surface the "
-            "full picture; the user calls the next move.",
+            "Real surprise. Diagnostics auto-run (identity / cross-distribution "
+            "deferred / random features). Do NOT modify RESEARCH.md / H2 / M2 "
+            "here — surface the full picture; the user calls the next move.",
         )
     return (
         "above_band",
@@ -124,16 +133,22 @@ def _classify(mean_m2: float) -> tuple[str, str]:
     )
 
 
-def _run_main_calibration(
-    *, encoder, n_videos: int, seed: int
-) -> tuple[list[dict], dict[str, float], dict[str, float]]:
-    """Encode N SSv2 clips clean+reverse and return per-clip + summary stats."""
-    print("\nLoading SSv2 dataset ...")
-    ds = load_ssv2_dataset(n_videos=n_videos, seed=seed)
-    print(f"  loaded {len(ds)} clips")
+def _run_main_calibration(*, encoder) -> tuple[list[dict], dict[str, float], dict[str, float]]:
+    """Encode all DAVIS val clips clean+reverse and return per-clip + summary stats.
+
+    DAVIS val is a fixed 30-clip set, so there is no ``n_videos`` knob and
+    no sample seed — the loader returns the canonical sequence list from
+    ``ImageSets/2017/val.txt``.
+    """
+    print("\nLoading DAVIS dataset ...")
+    ds = load_davis_dataset()
+    print(f"  loaded {len(ds)} clips (DAVIS 2017 val)")
 
     per_clip: list[dict] = []
     for i, sample in enumerate(ds):
+        # ``sample.frames`` is (T, H, W, 3) uint8 RGB, already cropped/resized
+        # to 384 by the loader. Masks come back too but M3 isn't wired into
+        # this calibration — we only need the frames here.
         frames_clean = np.ascontiguousarray(sample.frames)
         # ``[::-1]`` returns a non-contiguous view; ``copy()`` materializes a
         # clean uint8 buffer so ``encode``'s preprocessing stride math is sane.
@@ -154,8 +169,8 @@ def _run_main_calibration(
     return per_clip, m1_stats, m2_stats
 
 
-def _run_diagnostics(*, encoder, n_videos: int, seed: int) -> dict:
-    """M2<0.5 branch: identity / DAVIS reverse / random-features sanity.
+def _run_diagnostics(*, encoder) -> dict:
+    """M2<0.5 branch: identity / cross-distribution (deferred) / random sanity.
 
     Each diagnostic is independent. Failures inside one don't kill the
     others — the user wants the full picture.
@@ -165,9 +180,9 @@ def _run_diagnostics(*, encoder, n_videos: int, seed: int) -> dict:
     print("=" * 70)
     out: dict = {}
 
-    # 1) Identity on the same SSv2 clips. M2(F, F) must be ~0.
-    print("\n[diagnostic 1/3] Identity check on SSv2 clips")
-    ds = load_ssv2_dataset(n_videos=n_videos, seed=seed)
+    # 1) Identity on DAVIS clips. M2(F, F) must be ~0.
+    print("\n[diagnostic 1/3] Identity check on DAVIS clips")
+    ds = load_davis_dataset()
     identity_m2: list[float] = []
     for i, sample in enumerate(ds):
         frames = np.ascontiguousarray(sample.frames)
@@ -184,31 +199,23 @@ def _run_diagnostics(*, encoder, n_videos: int, seed: int) -> dict:
     )
     out["identity_m2"] = {"per_clip": identity_m2, "stats": identity_stats}
 
-    # 2) DAVIS reverse — different content distribution to SSv2.
-    print("\n[diagnostic 2/3] DAVIS reverse playback")
-    try:
-        from vjepa_stress.data.davis import load_davis_dataset
-        davis_ds = load_davis_dataset()
-        davis_iter = iter(davis_ds)
-        davis_m2: list[float] = []
-        for i in range(min(n_videos, len(davis_ds))):
-            sample = next(davis_iter)
-            frames_clean = np.ascontiguousarray(sample.frames)
-            frames_rev = np.ascontiguousarray(frames_clean[::-1])
-            f_clean = encoder.encode(frames_clean)
-            f_rev = encoder.encode(frames_rev)
-            m2 = float(compute_m2(f_clean, f_rev).item())
-            davis_m2.append(m2)
-            print(f"  [{i + 1}] {sample.sequence_id}: M2={m2:.4f}")
-        davis_stats = _summary(davis_m2)
-        print(
-            f"  DAVIS reverse stats: mean={davis_stats['mean']:.4f}  "
-            f"median={davis_stats['median']:.4f}  std={davis_stats['std']:.4f}"
-        )
-        out["davis_reverse_m2"] = {"per_clip": davis_m2, "stats": davis_stats}
-    except Exception as e:  # noqa: BLE001
-        print(f"  DAVIS diagnostic failed: {type(e).__name__}: {e}")
-        out["davis_reverse_m2"] = {"error": f"{type(e).__name__}: {e}"}
+    # 2) Cross-distribution probe — deferred. Originally this slot ran DAVIS
+    # reverse against an SSv2-primary calibration; with DAVIS as primary, the
+    # only useful "different distribution" probe locally would be SSv2, which
+    # isn't on disk by design (it lands on RunPod in Stage 1+). Keeping the
+    # JSON slot so a Stage-1 follow-up can populate it.
+    print("\n[diagnostic 2/3] Cross-distribution probe — deferred to Stage 1+")
+    print(
+        "  Primary calibration is already DAVIS reverse. The cross-distribution "
+        "probe (SSv2 reverse) is not run locally; SSv2 lands on RunPod."
+    )
+    out["cross_distribution_m2"] = {
+        "status": "deferred",
+        "note": (
+            "Primary calibration is DAVIS reverse; cross-distribution probe "
+            "would be SSv2 reverse, deferred to RunPod (Stage 1+) per task brief."
+        ),
+    }
 
     # 3) Random features sanity at the encoder's output shape.
     # RESEARCH.md §3.2 predicts ~1.14 on truly random gradient directions.
@@ -232,14 +239,12 @@ def _run_diagnostics(*, encoder, n_videos: int, seed: int) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Real-feature M2 calibration on SSv2 reverse playback."
+        description="Real-feature M2 calibration on DAVIS reverse playback."
     )
-    parser.add_argument("--n-videos", type=int, default=10)
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--device",
         default="cpu",
-        help="V-JEPA inference device. CPU is fine for 10 clips.",
+        help="V-JEPA inference device. CPU is fine for 30 clips.",
     )
     parser.add_argument("--variant", default="vjepa-2.1-vit-base")
     parser.add_argument(
@@ -250,13 +255,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    _check_ssv2_present()
+    _check_davis_present()
 
     manifest_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
     print(f"calibrate_m2_real: manifest_id={manifest_id} started_at={started_at}")
     print(f"  variant={args.variant} device={args.device}")
-    print(f"  n_videos={args.n_videos} seed={args.seed}")
+    print("  dataset=DAVIS 2017 val (fixed 30 clips)")
 
     print("\nLoading encoder ...")
     encoder = load_encoder(args.variant, device=args.device)
@@ -266,20 +271,18 @@ def main(argv: list[str] | None = None) -> int:
         f"tubelet_size={encoder.tubelet_size}"
     )
 
-    per_clip, m1_stats, m2_stats = _run_main_calibration(
-        encoder=encoder, n_videos=args.n_videos, seed=args.seed
-    )
+    per_clip, m1_stats, m2_stats = _run_main_calibration(encoder=encoder)
 
     branch, interpretation = _classify(m2_stats["mean"])
+    m2_formatted = [f"{r['m2']:.4f}" for r in per_clip]
+    m1_formatted = [f"{r['m1']:.4f}" for r in per_clip]
     print()
     print("=" * 70)
     print(
         f"M2(clean, reverse) on real {args.variant} / "
-        f"{len(per_clip)} SSv2 validation clips"
+        f"{len(per_clip)} DAVIS 2017 val clips"
     )
     print("=" * 70)
-    m2_formatted = [f"{r['m2']:.4f}" for r in per_clip]
-    m1_formatted = [f"{r['m1']:.4f}" for r in per_clip]
     print(f"  per-clip M2: {m2_formatted}")
     print(
         f"  M2 stats: mean={m2_stats['mean']:.4f}  median={m2_stats['median']:.4f}  "
@@ -301,9 +304,7 @@ def main(argv: list[str] | None = None) -> int:
 
     diagnostics: dict | None = None
     if branch == "below_floor":
-        diagnostics = _run_diagnostics(
-            encoder=encoder, n_videos=args.n_videos, seed=args.seed
-        )
+        diagnostics = _run_diagnostics(encoder=encoder)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -312,8 +313,8 @@ def main(argv: list[str] | None = None) -> int:
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "model": args.variant,
         "device": args.device,
+        "dataset": "davis-2017-val",
         "n_clips": len(per_clip),
-        "seed": args.seed,
         "predicted_band": list(PREDICTED_BAND),
         "branch": branch,
         "interpretation": interpretation,
