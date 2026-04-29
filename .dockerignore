@@ -1,0 +1,57 @@
+# Keep the Docker build context lean. The Dockerfile only COPYs pyproject.toml,
+# README.md, vjepa_stress/, scripts/, tests/, manifests/ — everything else here
+# is excluded both for speed (push to RunPod registry) and as a safety net so a
+# future COPY ./ doesn't accidentally bake in datasets, weights, or local venvs.
+
+# Git history — the image doesn't need it.
+.git/
+.gitignore
+.gitattributes
+
+# Host Python envs / caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Datasets and model weights — mounted as volumes at runtime, never baked.
+# DAVIS lives in ~/data/davis/ on the host; SSv2 lands directly on the RunPod
+# volume; V-JEPA weights come from the torch.hub cache (HF_HOME=/workspace/.cache).
+data/
+checkpoints/
+*.zip
+*.tar
+*.tar.gz
+*.parquet
+
+# Sweep / calibration outputs — generated inside the container, written to a
+# mounted output volume.
+logs/
+.runpod/
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Notebooks (kept in the repo but not needed in the image; they don't run
+# inside the container).
+notebooks/
+.ipynb_checkpoints/
+
+# Docs source — not needed at runtime; saves a few KB and avoids invalidating
+# the cache when only docs change.
+docs/
+*.md
+!README.md

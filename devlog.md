@@ -952,3 +952,106 @@ distribution like SSv2 — happens on RunPod once SSv2 is downloaded
 there. The script's diagnostic-2 slot is reserved for that follow-up.
 
 ---
+
+## 2026-04-29 — Stage 1: Dockerfile, .dockerignore, RunPod runbook, pilot script
+
+Stage 1 lands the operational surface for getting `vjepa-stress` onto a
+RunPod GPU box. No new science — just plumbing so the calibrated pipeline
+from Stage 0.6 can move off the laptop and onto a real GPU.
+
+### What changed
+
+1. **`.dockerignore` (new).** Without it, `docker build .` slurps the
+   ~800 MB DAVIS tree under `data/`, the host `.venv/`, and the git
+   history into the build context every time. The new file mirrors
+   `.gitignore`'s defensive list (datasets, weights, archives, caches,
+   editor cruft) plus excludes `*.md` (with `!README.md` allowlist) since
+   docs aren't needed at runtime. Build context should now be single-digit
+   MB.
+2. **Dockerfile — `TORCH_HOME` fix (real bug).** The previous version set
+   `HF_HOME=/workspace/.cache/huggingface` but did not set `TORCH_HOME`.
+   V-JEPA 2.1 weights load via `torch.hub.load(...)`, which uses
+   `~/.cache/torch/hub` by default — i.e. `/root/.cache/torch` inside
+   the container, which is *not* on the persistent volume. Without the
+   fix, every container restart would re-download ~1.5 GB (vit-large) or
+   ~6 GB (vit-gigantic). Now pinned to `/workspace/.cache/torch` so the
+   weight cache lives on the RunPod volume.
+3. **Dockerfile — env contract.** Added `VJEPA_STRESS_SSV2_DIR=/workspace/data/ssv2`
+   and `VJEPA_STRESS_DAVIS_DIR=/workspace/data/davis` so the loaders
+   resolve to the conventional in-container paths without a CLI flag.
+   Dropped the deprecated `TRANSFORMERS_CACHE` env (newer transformers
+   reads `HF_HOME` directly).
+4. **docker-compose parity.** Added a `torch-cache` named volume mounted
+   at `/workspace/.cache/torch`, plus the `TORCH_HOME` env, so local
+   `docker compose up` matches the RunPod env contract.
+5. **`scripts/pilot_runpod.py` (rewrite).** The old version imported
+   `vjepa_stress.config.SweepConfig`, which doesn't exist — Stage 0.6
+   moved to `RunnerConfig` with explicit factories. The new pilot script:
+   - Builds a 10-cell Tier-1 slice (1 model × 1 perturbation × all 10
+     strengths) directly from `STRENGTHS`.
+   - Loads the real `load_encoder` and `load_ssv2_dataset` lazily inside
+     `main()` so `--help` is cheap.
+   - Wires through `RunnerConfig` with the same `extra_manifest` shape
+     as `vjepa_stress.run_sweep`'s real-mode path, plus a `pilot=True`
+     flag so the manifest is unambiguous.
+   - Defaults: `vit-large`, `gaussian_noise`, `n_videos=4`, `device=auto`.
+6. **`docs/runpod.md` (new).** Operational runbook covering: build →
+   push → provision → first-run bootstrap (warm V-JEPA caches up-front
+   so a cold cache miss doesn't kill a cell mid-sweep) → pilot smoke →
+   full sweep. Includes the explicit "if pilot M1 doesn't trend with
+   strength, **stop**" gate.
+
+### Layer caching trade-off (recorded, not fixed)
+
+Current `Dockerfile` does:
+
+    COPY pyproject.toml README.md /workspace/
+    COPY vjepa_stress /workspace/vjepa_stress
+    RUN pip install -e ".[dev]"
+
+Any change under `vjepa_stress/` invalidates the COPY layer and re-runs
+`pip install`. With pip's cache warm and deps unchanged, this is fast
+(~10s — pip is just relinking the editable package). The "proper" fix
+(BuildKit `--mount=type=bind` or a stub-package + `--no-deps` two-step)
+is deferred until a build wall-time complaint actually appears.
+
+### What's deferred to Stage 2+
+
+- **Image SHA → manifest auto-capture.** Right now the runner records
+  whatever `extra_manifest` we pass; the runbook says "record the digest
+  manually." Stage 2 should pin this so a manifest can never be
+  mis-attributed to the wrong image.
+- **`scripts/run_full_sweep.py`.** Still a `NotImplementedError` stub.
+  The Stage-0.6 CLI (`python -m vjepa_stress.run_sweep --matrix all`)
+  covers the same ground; the dedicated entry-point is Stage 4.
+- **A Dockerfile-level smoke test.** Building the image and running
+  `pytest tests/test_real_pipeline_smoke.py -m slow` inside it is what
+  validates the image, but we don't have CI for that — only the
+  `docs/runpod.md` checklist.
+
+### Verification done locally
+
+- `python scripts/pilot_runpod.py --help` runs without importing torch
+  (lazy imports confirmed).
+- `python -c "import ast; ast.parse(open('scripts/pilot_runpod.py').read())"`
+  parses clean.
+- `.dockerignore` syntax validated by inspection (Docker treats it like
+  `.gitignore`; same patterns).
+
+The image itself is not built locally — Apple Silicon doesn't run the
+NGC CUDA base. Build verification happens on RunPod.
+
+### Next
+
+Stage 1 unblocks the actual RunPod sweep run. Concrete next steps:
+
+1. Build image on a Linux box (CI or local), push to a registry.
+2. Spin up a RunPod H100 instance, attach a 200 GB volume.
+3. Download SSv2 validation split to `/workspace/data/ssv2/`.
+4. Warm V-JEPA weight caches (the `for variant in ...` block in
+   `docs/runpod.md` §5).
+5. Run `tests/test_real_pipeline_smoke.py -m slow` inside the image.
+6. Run the pilot (`scripts/pilot_runpod.py`).
+7. Inspect M1 vs strength; if monotonic, launch the 222-cell sweep.
+
+---

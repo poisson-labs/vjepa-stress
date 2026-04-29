@@ -11,9 +11,13 @@ services:
       - ./data:/workspace/data
       - ./checkpoints:/workspace/checkpoints
       - hf-cache:/workspace/.cache/huggingface
+      # V-JEPA weights land here via torch.hub; persist across runs so we
+      # don't re-download ~1.5 GB on every `up`.
+      - torch-cache:/workspace/.cache/torch
     environment:
       - PYTHONPATH=/workspace
       - HF_HOME=/workspace/.cache/huggingface
+      - TORCH_HOME=/workspace/.cache/torch
     deploy:
       resources:
         reservations:
@@ -27,3 +31,4 @@ services:
 
 volumes:
   hf-cache:
+  torch-cache:
