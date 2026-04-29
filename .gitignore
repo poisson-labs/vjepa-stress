@@ -17,10 +17,14 @@ dist/
 .mypy_cache/
 
 # Project data and artifacts
+# Note: DAVIS / SSv2 / V-JEPA weights live outside the repo (~/data/, torch.hub
+# cache). The /data/ rule below covers anyone who drops a dataset tree inside
+# the repo root by accident; *.zip catches the raw archives.
 /data/
 !/data/.gitkeep
 /checkpoints/
 *.parquet
+*.zip
 
 # OS / editor
 .DS_Store
