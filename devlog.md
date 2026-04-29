@@ -775,3 +775,100 @@ either consume the first frame of each tubelet pair or majority-vote.
 That decision lives in the M3 runner integration, not the loader.
 
 ---
+
+## 2026-04-29 — Stage 0.6 Final integration smoke + real-mode CLI
+
+**Stage 0.6 is now code-complete.** Added the integration smoke that
+wires real V-JEPA + real SSv2 through the runner and writes a Parquet
+shard, plus the CLI affordance for invoking the runner without `--fake`.
+
+### CLI surface
+
+`run_sweep.py` no longer rejects non-`--fake` invocations. Two new args:
+
+- `--device` — `"auto"` (default) / `"cpu"` / `"cuda"` / `"mps"`. Threaded
+  into `load_encoder(...)`.
+- `--ssv2-cache-dir` — explicit override; falls back to
+  `$VJEPA_STRESS_SSV2_DIR`, then `~/data/ssv2/`.
+
+The factories are split into `_build_fake_factories(args)` and
+`_build_real_factories(args)`. Real-mode imports (`load_encoder`,
+`load_ssv2_dataset`) live inside `_build_real_factories` so a `--fake`
+or `--help` invocation never pays the torch.hub / cv2 import cost.
+
+The manifest's `extra` block now records `{"fake": false, "n_videos":
+..., "device": ..., "ssv2_cache_dir": ...}` in real mode so a future
+reader can tell which mode produced a shard.
+
+**SSv2 subsample seed.** The dataset factory passes `seed=args.master_seed`
+into `load_ssv2_dataset`. That deliberately couples the subsample to the
+sweep's master seed: a sweep run is now uniquely identified by
+`(master_seed, n_videos, on-disk pool)`, so changing master_seed
+produces a different video set *and* a different per-(video,perturb)
+seed dict — both of which is the right behavior for "rerun with a
+different seed."
+
+### `tests/test_real_pipeline_smoke.py`
+
+One test, `@pytest.mark.slow`, soft-skips when no SSv2 tree is present.
+Construction:
+
+- One `Cell(model="vjepa-2.1-vit-base", perturbation="gaussian_noise",
+  strength=0.5, tier=1)` — gaussian_noise so M1/M2 are *expected* to be
+  strictly positive; identity would assert ≈0 but wouldn't prove the
+  perturbation is reaching the encoder.
+- Real `load_encoder("vjepa-2.1-vit-base", device="cpu")` and
+  `load_ssv2_dataset(n_videos=2, seed=0, num_frames=16, image_size=384)`.
+- `run_sweep(...)` writes one shard with 2 rows.
+
+Assertions:
+
+- `m1` finite + `> 0` on every row
+- `m2` finite + `> 0` on every row
+- `m3` is NaN on every row (DAVIS plumbing not yet in the runner; this
+  is the pinned placeholder until M3 lands)
+
+### Why a separate `_real_ssv2_available()` helper
+
+Same soft-skip pattern as `test_ssv2_loader.py` and
+`test_davis_loader.py`. A single dev box may or may not have SSv2; on
+RunPod with cached SSv2 + cached weights, this is the canonical
+"the real sweep actually works" check.
+
+### Not yet a calibration test
+
+The smoke deliberately doesn't pin a magnitude band on M1/M2 — those
+calibration targets need real SSv2 statistics across many clips, not a
+2-clip sample. Calibration is a separate question deferred to Stage 1
+(devlog 2026-04-27 Task 3.5 entry covers the M2 reverse-band reasoning).
+
+### Suite state
+
+| | count |
+|---|---|
+| fast tests | 121 (unchanged) |
+| slow tests | 7 — 2 pass on this dev box (vit-base load + M2 synthetic-band); 5 soft-skip (no SSv2 / no DAVIS / no cached calibration data) |
+
+### Stage 0.6 close-out
+
+Stage 0.6 ledger:
+
+| Task | Status |
+|---|---|
+| 1. perturbations | ✅ Stage 0.5 |
+| 2. metrics | ✅ Stage 0.5 |
+| 3. V-JEPA loader | ✅ Task 3 (this stage) |
+| 3.5. M2 reverse calibration | ⚠️ deferred — calibration test soft-skips, synthetic curiosity pinned at M2 < 0.3 |
+| 4. SSv2 loader | ✅ Task 4 |
+| 5. DAVIS loader | ✅ Task 5 |
+| 6. Final integration smoke + CLI | ✅ this entry |
+
+### Next
+
+Stage 1 — Docker + RunPod. The CLI now actually invokes the real sweep
+when `--fake` is not set, so the next entry point is "containerize this
+and run a 12-cell tier2 slice on RunPod against real SSv2 + real
+weights." Calibration follow-ups (M2 band, M3 mechanism) wait until
+the real-feature corpus exists.
+
+---
