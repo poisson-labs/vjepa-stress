@@ -1055,3 +1055,149 @@ Stage 1 unblocks the actual RunPod sweep run. Concrete next steps:
 7. Inspect M1 vs strength; if monotonic, launch the 222-cell sweep.
 
 ---
+
+## 2026-04-29 — RunPod first-run bootstrap: SSv2 land + RoPE bf16 patch
+
+**Pod:** RTX PRO 6000 Blackwell Server Edition, 95 GB VRAM, MooseFS-backed
+`/workspace`. Bootstrapped from the Stage-1 image.
+
+### Numbers that matter
+
+- **SSv2 validation:** 24 777 IDs in `validation.json`, 24 777 symlinks
+  resolved (0 missing), 220 847 webms in the underlying tarball — the
+  full dataset, not just the val split, ships in one Qualcomm bundle.
+- **V-JEPA 2.1 forward-pass smoke** (16 frames @ 384², bf16 on CUDA):
+  | variant       | load (incl. download)  | fwd   | peak VRAM |
+  | ------------- | ---------------------- | ----- | --------- |
+  | vit-base      | 14.7 s (1.5 GB cached) | 0.0 s | 0.29 GB   |
+  | vit-large     | 30.8 s (4.8 GB)        | 0.1 s | 0.72 GB   |
+  | vit-giant     | 97.7 s (16.9 GB)       | 0.1 s | 2.11 GB   |
+  | vit-gigantic  | 134.5 s (30.2 GB)      | 0.2 s | 3.71 GB   |
+
+  All four are well under Blackwell's 95 GB ceiling — the gigantic OOM
+  worry from `EXPERIMENT.md` doesn't materialize here. Output shapes
+  match `(T_tubelet, P, D) = (8, 576, embed_dim)` for every variant.
+
+### Bug fixed: RoPE upcasts q/k to fp32, SDPA dies on dtype mismatch
+
+The first warm pass exposed a real V-JEPA upstream bug. With the model
+loaded in bf16 (the default we picked in `default_dtype_for_device`),
+the first forward inside `try_forward_pass` raised::
+
+    RuntimeError: Expected query, key, and value to have the same dtype,
+    but got query.dtype: float key.dtype: float and value.dtype:
+    c10::BFloat16 instead.
+
+Tracing it through `facebookresearch/vjepa2`:
+
+`RoPEAttention.forward` builds position tensors via
+`separate_positions(...)`, which does `1.0 * int_tensor` → fp32. Those
+go into `rotate_queries_or_keys`, which calls
+`torch.einsum("..., f -> ... f", pos, omega)` where `pos` is fp32 and
+`omega` is bf16 (built with `dtype=x.dtype`). Einsum promotes both to
+fp32, so `emb_sin` and `emb_cos` come out fp32. Then
+`(x * emb_cos) + (y * emb_sin)` (bf16 * fp32) returns fp32. Q and K leave
+the rotation in fp32; V never went through it and stays bf16. SDPA
+refuses the mismatch.
+
+**The fix is a tiny monkey-patch in `vjepa_stress.models.vjepa`**: after
+the model is built, walk its modules, find any `RoPEAttention` instance,
+locate its containing module, and wrap `rotate_queries_or_keys` with
+`(*args, **kwargs) → original(*args, **kwargs).to(x.dtype)`. The
+rotation math still runs in fp32 (so position precision is preserved),
+but the output is round-tripped to the activation dtype, which is what
+every other path in the model already assumes. We patch on every
+`load_encoder`, but a sentinel attribute makes it a no-op after the
+first call per process.
+
+The signature varies across V-JEPA hub versions — `src.models.utils.modules`
+ships `(x, pos)` while `app.vjepa_2_1.models.utils.modules` ships
+`(x, pos, n_registers, has_cls_first)` — so the wrapper forwards
+arbitrary args/kwargs and only inspects the first positional/`x` keyword
+to recover the input dtype.
+
+**Why not autocast or fp32 fallback.** Autocast is fragile across
+versions (different ops have different cast lists) and fp32 doubles VRAM
++ wall time for no benefit. The monkey-patch fixes only the actual bug,
+in one function, and leaves the rest of the model in bf16 as we
+intended. **Escape hatch:** if a future V-JEPA release reorders RoPE
+internals, set `dtype=torch.float32` on `load_encoder()` to bypass the
+issue entirely; the runner already accepts a dtype override.
+
+### Operational gotchas captured
+
+These cost ~30 minutes during the bootstrap; the next operator should
+not pay them again.
+
+- **MooseFS quota is real, df is misleading.** `df -h /workspace`
+  reports 307 TB free (the global pool), but the pod has a per-pod
+  quota. We hit "Disk quota exceeded" on small writes once the cache
+  filled past ~75 GB. The total on this pod is ~80 GB workable. Plan
+  for ~75 GB of permanent residents (V-JEPA weights 53 GB + SSv2 19 GB
+  + venv 1 GB + headroom). Delete `/workspace/data/ssv2_raw/` as soon as
+  extraction succeeds — the raw tarballs are 18.8 GB and have no
+  downstream use.
+- **MooseFS doesn't honor Unix permission bits.** `chmod 600` on a key
+  file lands as `0666`. SSH refuses such keys. Workaround: keep
+  identity files in `/root/.ssh/` (overlayfs, real perms), copy from
+  `/workspace/.ssh/` on container start. Captured in the pod's
+  `bootstrap.sh`.
+- **Qualcomm SSv2 distribution is one tarball, not val-only.** The
+  download is `20bn-something-something-v2-{00,01}` totalling ~18 GB;
+  the tarball expands to a single `20bn-something-something-v2/` dir
+  with 220 847 webms (full train+val+test pool). Validation is
+  identified via `labels/validation.json`. We materialize the val split
+  by symlinking every val ID into `/workspace/data/ssv2/validation/`,
+  pointing into the nested directory rather than flattening (220k file
+  moves on MooseFS is slow and fragile).
+- **`tar --no-same-owner` is required.** The Qualcomm tar has uid/gid
+  1001 baked in, and MooseFS doesn't allow chown by root. Without
+  `--no-same-owner`, tar emits 220k chown warnings, returns non-zero,
+  and any script with `set -e`/`pipefail` aborts. Files are still
+  extracted correctly, but the surrounding pipeline thinks it failed.
+- **Qualcomm signed URLs reject HTTP HEAD and `Range: bytes=N-M` for
+  N>0.** They accept full-byte-range probes (`--range 0-0`) and `-C -`
+  resume but only via HTTP/1.1 — HTTP/2 hits "INTERNAL_ERROR" near the
+  tail end of large downloads. Use `curl --http1.1 -C -` for any
+  resume. (We hit this when `vjepa-stress-v2-00` stalled at 99.8 %.)
+- **V-JEPA weight files are bigger than the runbook claims.**
+  `docs/runpod.md` says weights are "~10 GB across all four variants";
+  reality is **53 GB** (vit-base 1.5 + vit-large 4.8 + vit-giant 16.9 +
+  vit-gigantic 30.2). The runbook should be updated; for now treat the
+  200 GB volume budget as a hard constraint, not a comfortable one.
+
+### Bootstrap scripts that ran on the pod
+
+Three helper scripts live on the pod under `/workspace/scripts/` for
+this run; they aren't yet in the repo. Captured here so the next
+bootstrap doesn't reinvent them:
+
+- `stage1_setup.sh` — orchestrator that downloads the three SSv2
+  archives in parallel, then runs SSv2 plumbing and V-JEPA cache warm
+  concurrently, and writes `stage1_summary.txt`.
+- `build_val_symlinks.py` — reads `labels/validation.json`, finds the
+  webm directory under `_all/` (handling the nested layout), and
+  symlinks every val ID into `validation/` plus writes
+  `validation_ids.txt` as the resolved-id manifest.
+- `warm_vjepa.py` — loads each of the four variants once, runs a
+  16-frame forward, and prints the peak-VRAM / wall-time table that
+  appears at the top of this entry.
+
+**Deferred:** fold these into `scripts/` proper (they need a couple of
+tweaks: idempotent download with `--http1.1 -C -`, `tar --no-same-owner`,
+and replacing the inline V00/V01 URLs with a small CLI). Tracked
+alongside Stage 2's image-SHA work.
+
+### What's verified after this entry
+
+- The Stage-1 image runs cleanly on RunPod hardware.
+- All four V-JEPA 2.1 variants load and forward in bf16 with the new
+  RoPE patch; peak VRAM is far under the budget.
+- SSv2 validation is fully resolvable (24 777/24 777).
+- `load_ssv2_dataset(n_videos=2)` returns `(16, 384, 384, 3) uint8`
+  clips end-to-end.
+
+The blocker for the pilot is now just running it: the runner-side
+contract is otherwise green.
+
+---

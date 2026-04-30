@@ -27,6 +27,7 @@ Background and direct download URLs are documented in
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
 from contextlib import contextmanager
 from collections.abc import Iterator
@@ -395,6 +396,10 @@ def load_encoder(
 
     model.to(device=resolved_device, dtype=resolved_dtype)
 
+    # Patch upstream RoPE to keep its output in the activation dtype; without
+    # this, bf16 inference fails inside SDPA on V-JEPA 2.1's RoPE attention.
+    _patch_rope_dtype(model)
+
     encoder = VJEPAEncoder(
         variant=variant,
         model=model,
@@ -405,6 +410,69 @@ def load_encoder(
     # Reset the counter so callers see a clean count of their own forwards.
     encoder.forward_calls = 0
     return encoder
+
+
+def _patch_rope_dtype(model: torch.nn.Module) -> None:
+    """Coerce ``rotate_queries_or_keys`` output back to its input dtype.
+
+    Upstream ``facebookresearch/vjepa2`` builds RoPE position frequencies
+    as ``1.0 * int_tensor`` (fp32) and combines them with omega via
+    ``torch.einsum``, producing fp32 ``emb_sin`` / ``emb_cos`` regardless
+    of the input dtype. The rotated query/key therefore leaves the
+    function in fp32 even when ``x`` arrives in bf16, so when SDPA later
+    sees ``q``/``k`` in fp32 and ``v`` still in bf16 it raises::
+
+        RuntimeError: Expected query, key, and value to have the same
+        dtype, but got query.dtype: float key.dtype: float and
+        value.dtype: c10::BFloat16 instead.
+
+    The fix is local: cast the rotated output back to ``x.dtype``. The
+    rotation math still runs in fp32 (so we keep position precision), but
+    the result is round-tripped to the activation dtype, which is what
+    every other path in the model already assumes. We patch the upstream
+    module's namespace once per process; subsequent loads are no-ops.
+    """
+    # V-JEPA ships RoPE in two places: ``src.models.utils.modules`` (older
+    # signature ``rotate_queries_or_keys(x, pos)``) and
+    # ``app.vjepa_2_1.models.utils.modules`` (newer signature with
+    # ``n_registers`` and ``has_cls_first`` kwargs). The instance type tells
+    # us which one this model is wired to.
+    rope_modules: list[object] = []
+    for sub in model.modules():
+        if type(sub).__name__ == "RoPEAttention":
+            mod = inspect.getmodule(type(sub))
+            if mod is not None and mod not in rope_modules:
+                rope_modules.append(mod)
+    if not rope_modules:
+        return  # variant doesn't use RoPE — nothing to patch.
+
+    for rope_module in rope_modules:
+        if getattr(rope_module, "_vjepa_stress_rope_patched", False):
+            continue
+        original_fn = rope_module.rotate_queries_or_keys
+
+        def _make_dtype_safe(orig):
+            def _rope_dtype_safe(*args, **kwargs):
+                # First positional / ``x`` keyword is the activation tensor
+                # whose dtype we want to preserve. The signature differs
+                # across V-JEPA versions, so accept arbitrary args.
+                if args:
+                    x = args[0]
+                else:
+                    x = kwargs.get("x")
+                out = orig(*args, **kwargs)
+                if isinstance(x, torch.Tensor):
+                    return out.to(x.dtype)
+                return out
+
+            return _rope_dtype_safe
+
+        rope_module.rotate_queries_or_keys = _make_dtype_safe(original_fn)
+        rope_module._vjepa_stress_rope_patched = True
+        logger.info(
+            "patched %s.rotate_queries_or_keys to preserve input dtype",
+            rope_module.__name__,
+        )
 
 
 def vjepa_encoder_factory(model_name: str) -> VJEPAEncoder:
