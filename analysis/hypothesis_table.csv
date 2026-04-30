@@ -1,0 +1,6 @@
+hypothesis,prediction,measured,rule_met,verdict
+H1,"identity → max |M1|, |M2| < 1e-5","max |M1|=3.59e-07, max |M2|=1.52e-08",True,CONFIRMED
+H2,reverse → mean M2 > 0.8 and mean M1 < 0.10,"mean M2=1.0355, mean M1=0.3578",False,"PARTIAL (M2 ✓, M1 ✗)"
+H3,hflip → mean M2 < 0.30 and mean M1 > 0.05,"mean M2=0.9141, mean M1=0.3982; per-model M2={'vjepa-2.1-vit-base': 0.91, 'vjepa-2.1-vit-large': 0.9094, 'vjepa-2.1-vit-giant': 0.9198, 'vjepa-2.1-vit-gigantic': 0.9173}",False,REFUTED
+H4,frame_drops M2(s=0.5) > gaussian_noise M2(s=0.5),"frame_drops=0.3239, gaussian=0.4992, Δ=-0.1753",False,REFUTED
+H6,non-monotonic robustness on ≥1 Tier-1 perturbation,5 of 5 perturbations non-monotonic: gaussian_noise [giant→gigantic (+0.0380)]; motion_blur [giant→gigantic (+0.0504)]; frame_drops [large→giant (+0.0407)]; occlusion [large→giant (+0.0174)]; low_light [giant→gigantic (+0.0358)],True,CONFIRMED

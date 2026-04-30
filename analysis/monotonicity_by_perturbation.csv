@@ -1,0 +1,6 @@
+perturbation,m2_base,m2_large,m2_giant,m2_gigantic,monotonic,violations
+gaussian_noise,0.5105,0.4625,0.46,0.498,False,giant→gigantic (+0.0380)
+motion_blur,0.2651,0.2401,0.2294,0.2798,False,giant→gigantic (+0.0504)
+frame_drops,0.336,0.3328,0.3735,0.3464,False,large→giant (+0.0407)
+occlusion,0.1197,0.1165,0.1339,0.1288,False,large→giant (+0.0174)
+low_light,0.3359,0.3079,0.2985,0.3343,False,giant→gigantic (+0.0358)
