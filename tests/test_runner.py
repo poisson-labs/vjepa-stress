@@ -166,6 +166,21 @@ def test_shard_schema_is_locked(tmp_path: Path):
         assert f.type == ARROW_SCHEMA.field(f.name).type, f.name
 
 
+def test_runner_populates_wallclock_sec(tmp_path: Path):
+    """v1.1: the runner records a finite, non-negative per-row wallclock."""
+    cell = Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.5, tier=1)
+    config = _make_config(tmp_path, n_videos=3)
+    run_sweep(config, cells=[cell])
+
+    df = load_shards(tmp_path).df()
+    assert len(df) == 3
+    assert "wallclock_sec" in df.columns
+    # Even on the FakeEncoder these aren't zero — perf_counter has sub-µs
+    # resolution but encode + metric work is the dominant cost.
+    assert (df["wallclock_sec"] >= 0.0).all()
+    assert df["wallclock_sec"].apply(math.isfinite).all()
+
+
 def test_restart_after_injected_crash(tmp_path: Path):
     cells = [
         Cell("vjepa-2.1-vit-base", "gaussian_noise", 0.1, tier=1),

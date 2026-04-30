@@ -19,7 +19,14 @@ import pyarrow as pa
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Bumped whenever the row schema changes in a way that breaks readers.
-SCHEMA_VERSION: str = "1.0"
+#:
+#: 1.0 — initial schema (cell_id, tier, model, perturbation, strength,
+#:       video_id, seed, m1, m2, m3, notes).
+#: 1.1 — added ``wallclock_sec``: per-(cell, video) encode-pair wallclock
+#:       in seconds. DuckDB tolerates the column being missing on v1.0
+#:       shards (reads as NULL), so mixed-version aggregations still work
+#:       — readers that rely on ``wallclock_sec`` must coalesce.
+SCHEMA_VERSION: str = "1.1"
 
 
 class Row(BaseModel):
@@ -44,6 +51,7 @@ class Row(BaseModel):
     m1: float
     m2: float
     m3: float
+    wallclock_sec: float = Field(ge=0.0)
     notes: str = ""
 
     @field_validator("schema_version")
@@ -71,6 +79,7 @@ ARROW_SCHEMA: pa.Schema = pa.schema(
         pa.field("m1", pa.float64(), nullable=False),
         pa.field("m2", pa.float64(), nullable=False),
         pa.field("m3", pa.float64(), nullable=False),
+        pa.field("wallclock_sec", pa.float64(), nullable=False),
         pa.field("notes", pa.string(), nullable=False),
     ]
 )

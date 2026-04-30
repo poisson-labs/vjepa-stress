@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
@@ -256,15 +257,26 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
             # tensors across all videos in memory at once.
             iterator = config.dataset_factory()
             rows: list[Row] = []
+            cuda_available = torch.cuda.is_available()
             for video in iterator:
                 seed = lookup_seed(manifest, video.video_id, cell.perturbation)
                 frames_clean = np.ascontiguousarray(video.frames)
                 frames_perturbed = perturbation.apply(
                     frames_clean, strength=cell.strength, seed=seed
                 )
+                # Per-(cell, video) wallclock around the encode pair +
+                # metrics. CUDA work is async, so synchronize on both ends
+                # when a GPU is present — otherwise we'd be timing kernel
+                # launches, not kernel execution.
+                if cuda_available:
+                    torch.cuda.synchronize()
+                t_start = time.perf_counter()
                 m1, m2, m3 = _compute_metrics_for_cell(
                     cell, frames_clean, frames_perturbed, encoder
                 )
+                if cuda_available:
+                    torch.cuda.synchronize()
+                wallclock_sec = time.perf_counter() - t_start
                 rows.append(
                     Row(
                         cell_id=cell.cell_id,
@@ -277,6 +289,7 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
                         m1=m1,
                         m2=m2,
                         m3=m3,
+                        wallclock_sec=wallclock_sec,
                     )
                 )
 

@@ -32,6 +32,7 @@ def _example_row(**overrides) -> dict:
         "m1": 0.42,
         "m2": 0.17,
         "m3": float("nan"),
+        "wallclock_sec": 1.234,
         "notes": "",
     }
     base.update(overrides)
@@ -117,6 +118,44 @@ def test_full_round_trip_through_duckdb(tmp_path: Path):
     assert len(df) == 2
     assert df["schema_version"].iloc[0] == SCHEMA_VERSION
     assert df["seed"].iloc[0] == 12345
+
+
+def test_wallclock_sec_round_trips_through_parquet(tmp_path: Path):
+    """Schema v1.1: wallclock_sec is a required, non-null float64 column."""
+    rows = [
+        Row(**_example_row(wallclock_sec=0.123)),
+        Row(**_example_row(video_id="fake_0002", wallclock_sec=4.567)),
+    ]
+    table = rows_to_arrow_table(rows)
+    out = tmp_path / "wallclock.parquet"
+    pq.write_table(table, out)
+
+    read_back = pq.read_table(out)
+    assert "wallclock_sec" in read_back.schema.names
+    field = read_back.schema.field("wallclock_sec")
+    assert str(field.type) == "double"
+    assert not field.nullable
+    values = read_back.column("wallclock_sec").to_pylist()
+    assert values == [0.123, 4.567]
+
+
+def test_wallclock_sec_negative_rejected():
+    """Field(ge=0.0) — negative wallclock is a logic bug, not a measurement."""
+    with pytest.raises(ValidationError):
+        validate_row(_example_row(wallclock_sec=-0.001))
+
+
+def test_wallclock_sec_required():
+    """Adding wallclock_sec is a v1.1 break: writers must populate it."""
+    bad = _example_row()
+    del bad["wallclock_sec"]
+    with pytest.raises(ValidationError):
+        validate_row(bad)
+
+
+def test_schema_version_is_one_one():
+    """Tripwire: forces a deliberate touch of this test on the next bump."""
+    assert SCHEMA_VERSION == "1.1"
 
 
 def test_schema_version_field_must_match_constant():

@@ -1201,3 +1201,114 @@ The blocker for the pilot is now just running it: the runner-side
 contract is otherwise green.
 
 ---
+
+## 2026-04-30 — Pilot clean; schema 1.0 → 1.1 with `wallclock_sec`; full-sweep launch protocol
+
+**Commit:** _this entry_
+
+### Pilot result
+
+Ran `scripts/pilot_runpod.py` on the pod against vit-large × gaussian_noise
+× 10 strengths × 4 SSv2 clips (commit `10dd00b`). Outcome: 10 shards
+written, all rows finite, M1 ∈ [0.037, 0.273] and M2 ∈ [0.077, 0.557],
+both monotonically increasing with strength. No dtype/SDPA/cache-miss
+surprises in the log; the RoPE patch from `10dd00b` held under bf16. Box
+is wired correctly for the full sweep.
+
+### Pre-launch decision: SSv2-only tonight, DAVIS deferred
+
+Before kicking off the full sweep, surfaced a gap with the existing
+matrix and runner:
+
+- `vjepa_stress.sweep.matrix.Cell` has no `dataset` axis. The 222-cell
+  matrix is implicitly SSv2 throughout.
+- `runner._compute_metrics_for_cell` hard-codes `m3 = math.nan` (Stage
+  0.6 deferral; the docstring already flagged this).
+
+This means tonight's sweep cannot test **H5** (the M3-driven downstream-
+correlation hypothesis), even though DAVIS is on the pod from earlier
+calibration work. Two options weighed:
+
+- **(a)** Launch tonight as-is. M3 NaN on all 222 rows. H5 answered by a
+  follow-up DAVIS-only sweep (~30–45 min) tomorrow against the same image
+  SHA + frozen encoder.
+- **(b)** Pause and wire `Cell.dataset`, a runner dispatcher, and the M3
+  mask alignment math before launch. Half a day of careful work plus
+  another smoke pass.
+
+Picked **(a)**. The pre-registration argument cuts the same way as the
+n=200 decision: the registered matrix is 222 SSv2 cells, M3 was always
+tagged Stage-0.6 / deferred, and Tier-1+2+3 robustness data is what's
+gated by tonight's wallclock — not H5. **Escape hatch:** the morning
+follow-up is `python -m vjepa_stress.run_sweep --matrix davis-m3` once
+the Cell axis + dispatcher land; the SSv2 shards stitch in by `cell_id`
+at analysis time.
+
+### Schema bump 1.0 → 1.1: `wallclock_sec`
+
+Added a per-`(cell, video)` wallclock-seconds column to the row schema.
+The argument: future-self in 6 weeks doing Part 2 will want the timing
+data and won't be able to recover it without re-running the sweep.
+Cheap to capture now, expensive later.
+
+- `vjepa_stress/sweep/schema.py`: `SCHEMA_VERSION = "1.1"`,
+  `Row.wallclock_sec: float = Field(ge=0.0)`,
+  `pa.field("wallclock_sec", pa.float64(), nullable=False)` appended to
+  `ARROW_SCHEMA` before `notes`.
+- `vjepa_stress/sweep/runner.py`: timed around `_compute_metrics_for_cell`
+  with `torch.cuda.synchronize()` on both ends when CUDA is available
+  (otherwise we'd be measuring kernel-launch latency, not execution).
+  The pilot's v1.0 shards remain readable — DuckDB tolerates a missing
+  column as NULL, so mixed-version aggregations still work; only readers
+  that rely on `wallclock_sec` need a coalesce.
+- `tests/test_schema.py`: round-trip + nullability + negative-rejection
+  + version tripwire (`assert SCHEMA_VERSION == "1.1"` so the next bump
+  has to touch this test deliberately).
+- `tests/test_runner.py`: asserts the runner populates a finite,
+  non-negative `wallclock_sec` per row.
+
+All 126 fast tests green locally.
+
+### Matrix verify
+
+```
+$ python -c "from vjepa_stress.sweep.matrix import build_experiment_matrix as b; cs=b(); from collections import Counter; print(len(cs), Counter(c.tier for c in cs))"
+222 Counter({1: 200, 2: 12, 3: 10})
+```
+
+### Launch protocol (executes after this commit lands on the pod)
+
+```bash
+# pod-side
+git pull --ff-only
+SHA=$(git rev-parse --short HEAD)
+mkdir -p /workspace/runs/sweep-${SHA}
+
+tmux new -s sweep
+nvidia-smi -l 30 > /workspace/runs/sweep-${SHA}/gpu.log &
+python -m vjepa_stress.run_sweep \
+    --matrix all \
+    --output /workspace/runs/sweep-${SHA} \
+    --device cuda \
+    --n-videos 200 \
+    2>&1 | tee /workspace/runs/sweep-${SHA}/sweep.log
+# Ctrl-b d to detach
+```
+
+### Morning success criteria
+
+- 222 shards under `/workspace/runs/sweep-${SHA}/`
+- `manifest.json` records the post-this-entry SHA and `schema_version=1.1`
+- `m1`, `m2`, `wallclock_sec` finite on all rows
+- `m3` NaN on all rows (deferred to follow-up DAVIS sweep)
+- Identity probe: `m1 ≈ m2 ≈ 0` (float epsilon)
+- Reverse probe: `m2 ∈ [0.9, 1.4]`
+- Wallclock budget: 4–6 h H100 (estimated; will calibrate against tonight)
+
+### Stop-and-ping triggers
+
+- Schema/runner edits regress any test
+- Matrix verify returns anything other than `222 Counter({1:200, 2:12, 3:10})`
+- Sweep fails its first cell (pull the log, don't restart)
+
+---
