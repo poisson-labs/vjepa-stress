@@ -1583,3 +1583,135 @@ should be flagged or omitted; this is a coding-agent ask, logged in
 Total sweep wallclock: 6,729.7 s (1.87 h); estimated GPU cost $3.53.
 
 ---
+
+## 2026-04-30 — Stage 2: DAVIS / M3 sweep & H5 verdict
+
+DAVIS follow-up sweep (`sweep-davis-9fb565d`) and the H5 verdict are
+now both committed. 100 cells × 30 DAVIS 2017 val sequences = 3,000
+rows. All `m3_clean` and `m3_perturbed` finite, in [0, 1]. Shards at
+`runs/sweep-davis-9fb565d/*.parquet`; verdict tool at
+`scripts/h5_verdict.py`.
+
+### Why this sweep
+
+Stage 1 (sweep-b077627) measured M1 and M2 across 222 SSv2 cells but
+left M3 (patch-correspondence accuracy under tracking) on the floor —
+SSv2 has no per-frame instance masks. H5 was registered ahead of this
+run (commit 82c3e8e, predictions.md §H5) to test whether M2 — the
+gradient-aware temporal-drift metric — predicts downstream tracking
+failure on a labelled corpus. The pre-registered Pearson `r(ΔM3, M2)`
+thresholds:
+
+- `r > 0.5` → confirmed
+- `0.3 ≤ r ≤ 0.5` → ambiguous
+- `r < 0.3` → refuted
+
+### Wiring (committed in 9fb565d)
+
+- Schema 1.1 → 1.2: dropped legacy `m3`, added `m3_clean` +
+  `m3_perturbed` (so a single row carries both endpoints of ΔM3, not a
+  pre-differenced scalar that would lose the absolute level), added a
+  `dataset` axis with values `{"ssv2", "davis"}`.
+- `Cell` carries `dataset`. SSv2 `cell_id` format kept byte-identical
+  to the pre-DAVIS format (so existing SSv2 sweep-b077627 readers work
+  unmodified); DAVIS `cell_id` includes an explicit `davis` token to
+  prevent on-disk collision when (model, perturbation, strength, tier)
+  overlap.
+- `RunnerConfig` accepts per-axis factories (`ssv2_factory`,
+  `davis_factory`) and dispatches per cell. `_compute_metrics_for_cell`
+  returns `(m1, m2, m3_clean, m3_perturbed)`; on SSv2 (no masks) both
+  M3 columns are NaN.
+- M3 keypoint seed = `blake2b(video_id)`, independent of perturbation
+  seed. This is the H5 invariant: clean and perturbed rows track the
+  *same* keypoints against the *same* ground-truth masks, so ΔM3 is a
+  pure function of feature drift, not keypoint randomness.
+- ΔM3 semantics: original (clean) masks against perturbed features.
+  This is the only well-defined target — perturbation may scramble the
+  pixel grid, so re-extracting masks from perturbed frames would mix
+  perturbation effect with mask noise.
+- `compute_m3_for_clip` adapter reshapes the encoder's
+  `(T_tubelet, P, D)` output into `(T_tubelet, side, side, D)` (square
+  patch grid required), L2-normalizes, tubelet-pools masks via
+  per-pixel max (any-frame foreground stays foreground), and dispatches
+  to the existing `compute_m3`.
+
+### Run config
+
+- Models: vit-base, vit-large, vit-giant, vit-gigantic
+- Perturbations (Tier 1 only): gaussian_noise, motion_blur, frame_drops,
+  occlusion, low_light
+- Strengths (DAVIS): {0.1, 0.3, 0.5, 0.7, 0.9}
+- Clips: 30 DAVIS 2017 validation sequences, 16 frames each, 384×384
+- Master seed: 20260427
+- Hardware: single H100 on RunPod, bfloat16
+- Wallclock: 24:07 (1,447 s) end-to-end, ~14.5 s/cell
+- Code commit: `9fb565d`; manifest_id: `691b8f5a-...`
+
+### H5 verdict: REFUTED
+
+Pearson `r(ΔM3, M2) = +0.16` across n=3000 — well below the 0.3
+ambiguity floor.
+
+Per-model r is tightly clustered, so the lack of correlation is *not*
+a model-size artifact:
+
+| model    | r       | n   |
+|----------|---------|-----|
+| base     | +0.1203 | 750 |
+| large    | +0.1838 | 750 |
+| giant    | +0.1675 | 750 |
+| gigantic | +0.1654 | 750 |
+
+The interesting structure is per-perturbation:
+
+| perturbation    | r       | n   | band       |
+|-----------------|---------|-----|------------|
+| frame_drops     | +0.3700 | 600 | ambiguous  |
+| occlusion       | +0.3498 | 600 | ambiguous  |
+| motion_blur     | +0.0926 | 600 | refuted    |
+| low_light       | +0.0489 | 600 | refuted    |
+| gaussian_noise  | -0.0554 | 600 | refuted    |
+
+The two time-axis perturbations (frame_drops, occlusion) sit in the
+ambiguous band; the three image-noise-family perturbations (Gaussian,
+motion blur, low-light gamma) are essentially uncorrelated. M2 measures
+something — temporal-gradient drift — that translates to downstream
+tracking failure when the perturbation reorganizes the time axis, but
+not when it perturbs per-pixel signal at fixed temporal structure.
+
+### Distribution
+
+- M3 clean: mean 0.594, std 0.216 (range 0.107–1.000)
+- M3 perturbed: mean 0.580, std 0.220 (range 0.000–1.000)
+- ΔM3: mean +0.014, std 0.085 (range −0.393 to +0.393)
+- M1 (DAVIS): mean 0.080
+- M2 (DAVIS): mean 0.232
+
+ΔM3 is signed and roughly symmetric — perturbation isn't monotonically
+*hurting* tracking on every clip; some clips track better under
+perturbation (likely cases where the original encoder feature was
+already noisy and the perturbation accidentally smoothed it). This is
+itself evidence against a clean ΔM3↔M2 monotone story.
+
+### Methodology notes for the post
+
+- The pre-registered band split (confirm/ambiguous/refute) is doing
+  exactly the work it was meant to do: the per-perturbation breakdown
+  lands on both sides of the line and we have a defensible way to
+  write that up.
+- The H5-as-stated verdict is REFUTED; the more nuanced finding —
+  M2 is conditional on perturbation family — is post-hoc and has to
+  be flagged as such in the post.
+- `scripts/h5_verdict.py` runs end-to-end against the committed run
+  dir on either machine; it's the canonical reproduction of the
+  verdict numbers above.
+
+### Local mirror
+
+Run dir already rsync'd in; `runs/sweep-davis-9fb565d/` lives at the
+same path locally as on the pod. The Stage 5 analysis notebook can
+load both sweeps via `load_shards("runs/sweep-b077627")` and
+`load_shards("runs/sweep-davis-9fb565d")` against the same
+schema-v1.2 readers.
+
+---
