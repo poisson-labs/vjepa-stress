@@ -69,3 +69,16 @@ and the verdict.
 - **Artifacts.** `data/calibration/m2_reverse_calibration.json`
   (`manifest_id=b9d9bf22-7c4e-4045-b21a-2076c9da36f4`),
   `logs/m2_calibration.log`, devlog 2026-04-29.
+
+---
+
+## §3.1 — M1 (per-frame structural drift): methodology notes
+
+This subsection documents revisions to the M1 metric definition that emerged
+during Stage 5 analysis. It is appended to §3.1 (M1) and is a post-hoc
+methodology clarification; it does NOT amend any pre-registered prediction.
+The H2 prediction text is committed and unchanged.
+
+### Validity scope (added 2026-04-30, Stage 5)
+
+**Validity scope.** M1 assumes the perturbation preserves frame ordering. For perturbations that reorganize the time axis (reverse playback, frame drops with last-seen-frame substitution), M1 measures inter-frame distance in the original feature space rather than perturbation-induced drift, and is not a meaningful response metric. M1 is well-defined for: Gaussian noise, motion blur, occlusion, low-light gamma, JPEG compression, horizontal flip, identity. M1 is ill-defined for: reverse playback, frame drops. This scope was not flagged in the pre-registration; it was identified during Stage 5 analysis when reverse-playback M1 measured 0.358 (well above the H2 prediction of < 0.10). The H2 M1 component is therefore withdrawn as ill-defined; the H2 M2 component (predicted > 0.8, measured 1.036) stands and is confirmed. The pre-registered prediction text in §7 remains unmodified to preserve auditability.

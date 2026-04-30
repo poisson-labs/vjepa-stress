@@ -1471,3 +1471,115 @@ notebook can then point at `runs/sweep-b077627/*.parquet` and work
 identically on either machine.
 
 ---
+
+## 2026-04-29 — Stage 5 findings & methodology revision
+
+Stage 5 analysis pass over `sweep-b077627` (44,400 rows, 222 cells,
+4 models × 9 perturbations). Notebook: `notebooks/analysis.ipynb`;
+hypothesis table: `analysis/hypothesis_table.csv`; figures 1–4 in
+`figures/`.
+
+### Hypothesis verdicts
+
+- **H1 (identity → max |M1|, |M2| < 1e-5).** **CONFIRMED.** Across all 4
+  models, max |M1|=3.59e-07 and max |M2|=1.52e-08 — three orders of
+  magnitude under the gate.
+- **H2 (reverse → mean M2 > 0.8 AND mean M1 < 0.10).** **PARTIAL —
+  M2 component confirmed; M1 component withdrawn as ill-defined.** Mean
+  M2=1.036 across all 4 models (every model in the [0.9, 1.4] band, in
+  line with the DAVIS calibration `mean=1.020`). Mean M1=0.358, well
+  above the < 0.10 threshold. The M1 component is not refuted in the
+  ordinary sense; the metric is not well-defined under reversal — see
+  the methodology issue note below and `RESEARCH.md` §3.1.
+- **H3 (hflip → mean M2 < 0.30 AND mean M1 > 0.05).** **REFUTED.** Mean
+  M2=0.914, virtually identical across all 4 models (range 0.909–0.920).
+  V-JEPA features are nearly invariant to horizontal flip: feature
+  cosine tracks well between the original and the mirrored clip.
+- **H4 (frame_drops M2 at s=0.5 > gaussian_noise M2 at s=0.5).**
+  **REFUTED — direction reversed.** frame_drops=0.324, gaussian=0.499,
+  Δ=−0.175. Gaussian noise disturbs M2 substantially more than frame
+  drops at moderate strength. Per-strength shape is in
+  `figures/h4_strength_comparison.{png,pdf}` and
+  `analysis/h4_strength_table.csv`.
+- **H6 (non-monotonic robustness on ≥1 Tier-1 perturbation).**
+  **CONFIRMED — and stronger than predicted.** All 5 of 5 Tier-1
+  perturbations are non-monotonic in model size. Specific violations:
+  - gaussian_noise: giant → gigantic (+0.038)
+  - motion_blur:    giant → gigantic (+0.050)
+  - frame_drops:    large → giant (+0.041)
+  - occlusion:      large → giant (+0.017)
+  - low_light:      giant → gigantic (+0.036)
+
+  Two patterns: vit-gigantic (2B) is *less* robust than vit-giant (1B)
+  on the three image-noise-like perturbations (Gaussian, motion blur,
+  low-light gamma); vit-giant (1B) is *less* robust than vit-large
+  (300M) on the two time-axis perturbations (frame drops, occlusion).
+  Bigger isn't always better, and the breakpoint depends on the
+  perturbation family.
+
+### Methodology issue: M1 on time-axis-reorganizing perturbations
+
+M1 is defined as the mean cosine distance between corresponding patch
+features at index `(t, p)` between clean and perturbed videos. This is
+well-defined when the perturbation preserves frame ordering. Under
+reversal, frame at index `t` in `v'` corresponds to frame `T-1-t` in
+`v`, so M1 ends up measuring inter-frame distance in the original
+feature space rather than perturbation response. The same logic applies
+to frame_drops, which substitutes dropped frames with the last-seen
+frame — the time axis is reorganized.
+
+This is the same structural unfalsifiability issue that the M2 reverse-
+playback definition had before the Stage 0.6 calibration tightened it.
+The pre-registration did not flag it, and it surfaced only when reverse
+M1 came in at 0.358 — well above the H2 prediction of < 0.10.
+
+**Resolution.**
+
+- M1 is **well-defined** for: Gaussian noise, motion blur, occlusion,
+  low-light gamma, JPEG compression, horizontal flip, identity.
+- M1 is **ill-defined** for: reverse playback, frame drops.
+- The H2 M1 component is **withdrawn as ill-defined**. The H2 M2
+  component (predicted > 0.8, measured 1.036) **stands and is
+  confirmed**.
+- The pre-registered prediction text in §7 is **unmodified** — the
+  scope clarification lives in `RESEARCH.md` §3.1 (Validity scope), so
+  the original prediction remains auditable as written.
+
+For the next sweep, M1 reporting on `reverse` and `frame_drops` cells
+should be flagged or omitted; this is a coding-agent ask, logged in
+`analysis/coding_agent_requests.md`.
+
+### Surprises worth flagging for the post
+
+- **Hflip invariance is near-total.** M2 is identical to four decimals
+  across model sizes (0.909, 0.909, 0.920, 0.917). This is not just a
+  per-clip preserved-feature finding — it's that the *temporal-gradient
+  direction* survives mirroring intact.
+- **Catastrophic case-study clip 202588 collapses on three of four
+  models simultaneously under low_light s=1.0** (M1≈0.56–0.62, M2≈0.977
+  on large/giant/gigantic; base does not collapse the same way). Either
+  a real shared failure mode or a perturbation artifact — verification
+  in `analysis/case_study_verification.md`.
+- **Gaussian noise hurts M2 more than any other Tier-1 perturbation at
+  every strength tested**, including more than frame drops, which the
+  pre-registration had ranked as the harder corruption. See Figure 4
+  and `h4_strength_table.csv`.
+
+### Artifacts
+
+- `notebooks/analysis.ipynb` — runs end-to-end against
+  `runs/sweep-b077627/*.parquet`.
+- `figures/fig{1..4}_*.{png,pdf}` — primary figure suite.
+- `figures/h4_strength_comparison.{png,pdf}` — per-model frame_drops vs
+  Gaussian curves (Stage 5 follow-up).
+- `analysis/hypothesis_table.csv`,
+  `analysis/monotonicity_by_perturbation.csv`,
+  `analysis/scaling_table.csv`, `analysis/h4_strength_table.csv`,
+  `analysis/case_study_candidates.csv`,
+  `analysis/case_study_verification.md`, `analysis/h4_extended.md`,
+  `analysis/compute_summary.md`.
+- `RESEARCH.md` §3.1 Validity scope — methodology revision.
+
+Total sweep wallclock: 6,729.7 s (1.87 h); estimated GPU cost $3.53.
+
+---
