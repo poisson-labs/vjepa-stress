@@ -1365,3 +1365,109 @@ After this commit the launch is just:
    (the script handles venv + env vars + sweep CLI)
 
 ---
+
+## 2026-04-30 — Stage 1 sweep-b077627 closeout
+
+**The full 222-cell sweep landed cleanly overnight.** This is the
+canonical artifact for Part 1 of the V-JEPA 2.1 frozen-encoder
+robustness study; everything downstream (analysis notebook, plots,
+writeup) should point at `runs/sweep-b077627/`.
+
+### Run-level facts
+
+| field | value |
+|---|---|
+| `code_commit` | `b077627fd5920cc3709a1a087f008cac324e6da2` |
+| `manifest_id` | `3fa7d072-f34b-4e48-a8a3-713db55a292a` |
+| `schema_version` | `1.1` |
+| `matrix_fingerprint` | `4874e7c9d9c53c92082227b01bbadfff` |
+| cells | 222/222 written, 0 skipped |
+| rows | 44,400 (= 222 × 200) |
+| wall | 2 h 47 m 45 s on a single H100 |
+| size on disk | 5.0 MB total (parquet) |
+| pod path | `/workspace/runs/sweep-b077627/` |
+
+### Morning success criteria — all six green
+
+1. **222 shards**: ✓ 222/222 parquet shards present, plus
+   `manifest.json`, `gpu.log`, `sweep.log`.
+2. **`schema_version=1.1` uniform**: ✓ every row, every shard.
+3. **`code_commit` recorded**: ✓ `b077627…` in manifest.
+   (Field is `code_commit` not `git_sha`, per the manifest module's
+   existing contract — caught the naming mismatch during validation.)
+4. **`m1`, `m2`, `wallclock_sec` finite on all rows**: ✓ 44400/44400
+   each. No NaN, no Inf.
+5. **`m3` NaN universally**: ✓ 44400/44400, as planned. M3
+   (cross-frame attention disagreement) is deferred to the DAVIS
+   follow-up sweep — the SSv2-only matrix in this run does not have
+   the action-segment annotations M3 was designed against, so the
+   runner hard-codes `m3 = math.nan` for SSv2 cells. See plan-(a)
+   below.
+6. **Calibration probes**:
+   - **Identity** (`m1 ≈ m2 ≈ 0`): max |m1| = 3.59e-7,
+     max |m2| = 1.52e-8 across all 4 models. Float-ε clean — the
+     encoder-pair determinism is intact at the row level.
+   - **Reverse** (`m2 ∈ [0.9, 1.4]`): per-model means
+     vit-base 1.035, vit-large 1.037, vit-giant 1.034,
+     vit-gigantic 1.036 — all dead-center in the band. Per-row
+     `m2.min` dips to ~0.76 on a handful of videos that are inherently
+     time-symmetric (slow object translations, periodic motions);
+     this is expected variance, not a regression. The calibration
+     contract is on the mean, not the per-row floor.
+
+### Wallclock distribution (the v1.1 payoff)
+
+The whole reason we bumped to schema 1.1 was to capture per-row
+wallclock so future-self has a cost curve at hand without re-running
+anything:
+
+```
+wallclock_sec     min=0.044  mean=0.152  max=0.497  (seconds per video-cell pair)
+```
+
+That's the encode-pair wallclock under `torch.cuda.synchronize()`,
+covering both clean and perturbed encodes plus the metric ops. ~6.6×
+range across (model, perturbation, video) combos. Enough resolution
+to fit a model-size × perturbation cost surface in Part 2 without
+needing a separate timing run.
+
+### Runner correctness signal: encoder loaded once per unique model
+
+The tmux capture confirmed exactly four `loading encoder for model=…`
+log lines across the whole 222-cell run, at cell indices
+`{0, 53, 116, 169}` for `{vit-base, vit-large, vit-giant, vit-gigantic}`
+respectively. Vit-large was responsible for 63 cells (50 T1 + 3 T2 +
+10 T3 jpeg) — the runner's group-by-model ordering kept the T3 codec
+shards inside the vit-large block instead of forcing a reload, which
+is the contract the `test_encoder_loaded_once_per_unique_model` test
+pins. This matters because re-loading vit-gigantic is the single
+biggest discrete cost in the sweep; a regression here would more than
+double wall.
+
+### Plan-(a) confirmation
+
+Going into the launch we had two options:
+
+- **(a)** SSv2-only sweep tonight; defer M3 + DAVIS to a follow-up.
+- **(b)** Stop and wire M3 + DAVIS into the matrix and runner first.
+
+We chose (a) and it was the right call. Plan-(a) artifact:
+`sweep-b077627`, complete and validated. Plan-(b) work is the next
+thing on deck:
+
+- Wire `dataset` field into `Cell` and the matrix builder (currently
+  Cell has no dataset axis; SSv2 is implicit).
+- Add a DAVIS loader analogous to `vjepa_stress/data/ssv2.py`,
+  manual-download semantics included.
+- Implement M3 in the runner (cross-frame attention disagreement
+  against DAVIS object masks).
+- Run a DAVIS-only sweep — H5 hypothesis test deferred from this run.
+
+### Local mirror
+
+After commit + push of this entry, `runs/sweep-b077627/` will be
+rsync'd from the pod into the same path locally. The analysis
+notebook can then point at `runs/sweep-b077627/*.parquet` and work
+identically on either machine.
+
+---
