@@ -1311,4 +1311,57 @@ python -m vjepa_stress.run_sweep \
 - Matrix verify returns anything other than `222 Counter({1:200, 2:12, 3:10})`
 - Sweep fails its first cell (pull the log, don't restart)
 
+### Update — first launch hit the third trigger; loader bug found and fixed
+
+First sweep launch (`242b6e9`) died on cell 1 video 1 with:
+
+```
+RuntimeError: cv2 read failed at frame 42 of /workspace/data/ssv2/validation/10220.webm
+```
+
+**Diagnosis.** `_load_frames_with_opencv` in `vjepa_stress/data/ssv2.py`
+trusted `cap.get(cv2.CAP_PROP_FRAME_COUNT)` to choose seek targets. For
+SSv2 webm `10220`, the header claims 43 frames but only 42 are
+decodable. The clamp at `last_valid = total - 1` clamped against the
+*lying* total, so `cap.set(POS_FRAMES, 42)` + `cap.read()` returned
+`ok=False` and the loader raised. Pilot at `n=4` happened to sample
+videos with honest headers; the deterministic `n=200` subsample
+includes 10220 first.
+
+**Fix (`<next-commit>`).** Switched the loader from seek-and-decode to
+**sequential decode + downsample**. Read every frame into memory until
+`cap.read()` returns `ok=False` (the truthful EOF marker), then
+`linspace`-index the in-memory list. SSv2 clips average ~50 frames so
+the cost is negligible vs. the encode pass. As a side benefit this
+also fixes OpenCV's well-known seek-inaccuracy on VFR WebM, where
+seeking to frame N can return a neighboring keyframe.
+
+**Tests added.**
+- `test_short_clip_does_not_crash`: synthetic 4-frame mp4, loader
+  returns `(16, 64, 64, 3)` via clamped repetition.
+- `test_loader_robust_to_lying_frame_count_header`: monkey-patches
+  `cv2.VideoCapture.get(CAP_PROP_FRAME_COUNT)` to return 100 against
+  an 8-frame mp4. Pre-fix: seek loader raises. Post-fix: passes.
+
+128/128 fast tests green (was 126).
+
+**Determinism note.** The new loader returns identical frames to the
+old one for any video with an honest header — same `linspace` indices,
+same content. So pilot v1.0 shards stay comparable to full-sweep v1.1
+shards on the same `(video, frame-set)`. Different content only for
+the (small) set of videos with header lies, where the new loader is
+correct and the old one would have raised.
+
+**Operational gotcha captured for the runbook.**
+`/workspace/.venv` is the canonical interpreter on the pod, not system
+python. The first launch script forgot to activate it; even the second
+script needed an explicit `export VJEPA_STRESS_SSV2_DIR=/workspace/data/ssv2`
+because tmux sessions inherit nothing from a login shell. The pod's
+`/root/.bashrc` is currently empty.
+
+After this commit the launch is just:
+1. `git pull --ff-only` on the pod
+2. `tmux new -s sweep` and run `/workspace/scripts/run_sweep.sh`
+   (the script handles venv + env vars + sweep CLI)
+
 ---

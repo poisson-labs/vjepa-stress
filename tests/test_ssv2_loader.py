@@ -228,6 +228,83 @@ def test_dataset_iteration_yields_runner_compatible_samples(tmp_path):
 # ---------- slow / real-data path -----------------------------------------
 
 
+def test_short_clip_does_not_crash(tmp_path):
+    """Regression: clips with fewer total frames than ``num_frames=16``
+    must decode (with linspace-clamped repetition) rather than raise.
+
+    SSv2 has clips down to ~30 frames; this test uses 4 to be safe.
+    Pre-fix this would still pass (because the seek path handled it),
+    but we also pin the post-fix sequential-decode contract here."""
+    val = tmp_path / "validation"
+    val.mkdir()
+    _write_synthetic_mp4(val / "short.mp4", n_frames=4, height=60, width=80)
+
+    ds = load_ssv2_dataset(
+        cache_dir=tmp_path,
+        n_videos=1,
+        image_size=64,
+        num_frames=16,
+        file_patterns=("*.mp4",),
+    )
+    sample = ds[0]
+    assert sample.frames.shape == (16, 64, 64, 3)
+    assert sample.frames.dtype == np.uint8
+
+
+def test_loader_robust_to_lying_frame_count_header(tmp_path, monkeypatch):
+    """Regression for the SSv2 ``10220.webm`` failure: ``CAP_PROP_FRAME_COUNT``
+    can claim more frames than ``cap.read()`` can actually decode. The
+    loader must not trust the header — it sequentially decodes and uses
+    the truthful count.
+
+    We simulate this by writing an honest 8-frame mp4 and monkey-patching
+    ``cv2.VideoCapture`` so its ``get(CAP_PROP_FRAME_COUNT)`` returns 100
+    (a lie). Pre-fix, the seek-based loader would try to seek to frame 99
+    and raise. Post-fix, sequential decode hits EOF at frame 8 and the
+    16 sampled indices are computed from that truthful count.
+    """
+    val = tmp_path / "validation"
+    val.mkdir()
+    _write_synthetic_mp4(val / "00001.mp4", n_frames=8, height=60, width=80)
+
+    real_video_capture = cv2.VideoCapture
+
+    class LyingCapture:
+        def __init__(self, *args, **kwargs):
+            self._cap = real_video_capture(*args, **kwargs)
+
+        def isOpened(self):
+            return self._cap.isOpened()
+
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_COUNT:
+                return 100.0  # the lie
+            return self._cap.get(prop)
+
+        def set(self, prop, value):
+            return self._cap.set(prop, value)
+
+        def read(self):
+            return self._cap.read()
+
+        def release(self):
+            return self._cap.release()
+
+    monkeypatch.setattr("vjepa_stress.data.ssv2.cv2.VideoCapture", LyingCapture)
+
+    ds = load_ssv2_dataset(
+        cache_dir=tmp_path,
+        n_videos=1,
+        image_size=64,
+        num_frames=16,
+        file_patterns=("*.mp4",),
+    )
+    sample = ds[0]
+    # Loader must not have raised. Frames are valid uint8.
+    assert sample.frames.shape == (16, 64, 64, 3)
+    assert sample.frames.dtype == np.uint8
+
+
 @pytest.mark.slow
 def test_load_returns_correct_count_real_ssv2():
     if not _real_ssv2_available():

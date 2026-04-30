@@ -87,18 +87,42 @@ def _load_frames_with_opencv(
     rounded to int (the same convention the FakeVideoDataset would use
     if we ever needed to re-sample). Short-side resize + center-crop
     keeps aspect ratio without breaking object scale.
+
+    **Decode strategy.** We sequentially decode every frame into memory
+    and then downsample by index, rather than seeking with
+    ``CAP_PROP_POS_FRAMES``. Two reasons:
+
+    1. ``CAP_PROP_FRAME_COUNT`` lies on a non-trivial fraction of SSv2
+       webms (e.g. ``10220.webm`` claims 43 frames but only 42 are
+       decodable — frame index 42 returns ``ok=False`` and the seek
+       path raises mid-sweep). Sequential decode gives us the truthful
+       count.
+    2. Even when the count is honest, OpenCV seek on VFR WebM is not
+       frame-accurate; it can return a neighboring keyframe. Sequential
+       decode is bit-deterministic.
+
+    SSv2 clips average ~50 frames so decoding all of them is
+    negligible vs. the encode pass that follows.
     """
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError(f"OpenCV failed to open {path}")
 
     try:
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total <= 0:
-            raise RuntimeError(f"video has 0 frames: {path}")
+        # Sequential decode of the entire clip. Stop on the first
+        # ``ok=False`` from cap.read(), which is the truthful EOF
+        # marker regardless of what the header claims.
+        frames_bgr: list[np.ndarray] = []
+        while True:
+            ok, frame_bgr = cap.read()
+            if not ok or frame_bgr is None:
+                break
+            frames_bgr.append(frame_bgr)
 
-        # Some containers report a slightly inflated frame count; clamp
-        # the requested indices so seek doesn't run past the EOF.
+        total = len(frames_bgr)
+        if total == 0:
+            raise RuntimeError(f"video has 0 decodable frames: {path}")
+
         last_valid = total - 1
         indices = np.linspace(0, last_valid, num_frames).round().astype(np.int64)
         indices = np.clip(indices, 0, last_valid)
@@ -107,13 +131,7 @@ def _load_frames_with_opencv(
             (num_frames, image_size, image_size, 3), dtype=np.uint8
         )
         for i, idx in enumerate(indices):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-            ok, frame_bgr = cap.read()
-            if not ok or frame_bgr is None:
-                raise RuntimeError(
-                    f"cv2 read failed at frame {int(idx)} of {path}"
-                )
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            frame_rgb = cv2.cvtColor(frames_bgr[int(idx)], cv2.COLOR_BGR2RGB)
             out[i] = _resize_and_center_crop(frame_rgb, image_size)
         return out
     finally:
