@@ -1,0 +1,240 @@
+{
+  "code_commit": "9fb565da39c8d10e7b3a7223e0f34f7c58afddbd",
+  "extra": {
+    "davis_cache_dir": "/workspace/data/davis_raw",
+    "davis_image_size": 384,
+    "davis_num_frames": 16,
+    "device": "cuda",
+    "fake": false,
+    "n_videos": 4,
+    "ssv2_cache_dir": null
+  },
+  "library_versions": {
+    "duckdb": "1.5.2",
+    "numpy": "1.26.4",
+    "opencv-python-headless": "4.11.0.86",
+    "pandas": "3.0.2",
+    "pyarrow": "24.0.0",
+    "pydantic": "2.13.3",
+    "torch": "2.8.0+cu128",
+    "transformers": "5.7.0"
+  },
+  "manifest_id": "691b8f5a-061e-4770-b74e-081a5853a954",
+  "matrix_fingerprint": "88f9bd97feda8a6ea4d6695d9912fa56",
+  "n_videos": 30,
+  "platform": "Linux-6.8.0-106-generic-x86_64",
+  "python_version": "3.12.3",
+  "schema_version": "1.2",
+  "seeds": {
+    "davis::bike-packing": {
+      "frame_drops": 686516757,
+      "gaussian_noise": 1686112216,
+      "low_light": 1772208688,
+      "motion_blur": 234383838,
+      "occlusion": 1241067532
+    },
+    "davis::blackswan": {
+      "frame_drops": 1379070186,
+      "gaussian_noise": 257711628,
+      "low_light": 833619711,
+      "motion_blur": 25985754,
+      "occlusion": 996198487
+    },
+    "davis::bmx-trees": {
+      "frame_drops": 442759946,
+      "gaussian_noise": 358718405,
+      "low_light": 608886298,
+      "motion_blur": 895038827,
+      "occlusion": 654235871
+    },
+    "davis::breakdance": {
+      "frame_drops": 1494503802,
+      "gaussian_noise": 1322319747,
+      "low_light": 373330327,
+      "motion_blur": 1319778170,
+      "occlusion": 855778805
+    },
+    "davis::camel": {
+      "frame_drops": 513154283,
+      "gaussian_noise": 449129061,
+      "low_light": 378601174,
+      "motion_blur": 1608877619,
+      "occlusion": 1440849467
+    },
+    "davis::car-roundabout": {
+      "frame_drops": 1418002145,
+      "gaussian_noise": 970638280,
+      "low_light": 1967516712,
+      "motion_blur": 412043148,
+      "occlusion": 610986329
+    },
+    "davis::car-shadow": {
+      "frame_drops": 1553789073,
+      "gaussian_noise": 652677510,
+      "low_light": 673698686,
+      "motion_blur": 585239256,
+      "occlusion": 82099700
+    },
+    "davis::cows": {
+      "frame_drops": 64085475,
+      "gaussian_noise": 2143413490,
+      "low_light": 600153602,
+      "motion_blur": 1835473253,
+      "occlusion": 143700087
+    },
+    "davis::dance-twirl": {
+      "frame_drops": 523220176,
+      "gaussian_noise": 2039039826,
+      "low_light": 1000316790,
+      "motion_blur": 171303229,
+      "occlusion": 1177620794
+    },
+    "davis::dog": {
+      "frame_drops": 497336658,
+      "gaussian_noise": 1251353953,
+      "low_light": 2092521045,
+      "motion_blur": 117587977,
+      "occlusion": 1485598557
+    },
+    "davis::dogs-jump": {
+      "frame_drops": 1037046921,
+      "gaussian_noise": 588554960,
+      "low_light": 1770826549,
+      "motion_blur": 1982580292,
+      "occlusion": 679329014
+    },
+    "davis::drift-chicane": {
+      "frame_drops": 674514298,
+      "gaussian_noise": 1035083684,
+      "low_light": 1524868093,
+      "motion_blur": 263695122,
+      "occlusion": 597487141
+    },
+    "davis::drift-straight": {
+      "frame_drops": 1688074927,
+      "gaussian_noise": 824627834,
+      "low_light": 87863484,
+      "motion_blur": 349892550,
+      "occlusion": 301405932
+    },
+    "davis::goat": {
+      "frame_drops": 1459101722,
+      "gaussian_noise": 724687432,
+      "low_light": 287473740,
+      "motion_blur": 421959201,
+      "occlusion": 593293917
+    },
+    "davis::gold-fish": {
+      "frame_drops": 1511519114,
+      "gaussian_noise": 1319121789,
+      "low_light": 740659974,
+      "motion_blur": 1100998409,
+      "occlusion": 1712549105
+    },
+    "davis::horsejump-high": {
+      "frame_drops": 35906664,
+      "gaussian_noise": 951719677,
+      "low_light": 260344241,
+      "motion_blur": 1543686246,
+      "occlusion": 133251299
+    },
+    "davis::india": {
+      "frame_drops": 884296340,
+      "gaussian_noise": 299358116,
+      "low_light": 1412341507,
+      "motion_blur": 1857445297,
+      "occlusion": 346069161
+    },
+    "davis::judo": {
+      "frame_drops": 744203695,
+      "gaussian_noise": 356038802,
+      "low_light": 2138296530,
+      "motion_blur": 981551721,
+      "occlusion": 963667418
+    },
+    "davis::kite-surf": {
+      "frame_drops": 920229742,
+      "gaussian_noise": 171786356,
+      "low_light": 2031241204,
+      "motion_blur": 1078812908,
+      "occlusion": 668886811
+    },
+    "davis::lab-coat": {
+      "frame_drops": 504739209,
+      "gaussian_noise": 731234256,
+      "low_light": 2049768173,
+      "motion_blur": 1216581140,
+      "occlusion": 44896822
+    },
+    "davis::libby": {
+      "frame_drops": 1792290600,
+      "gaussian_noise": 72827807,
+      "low_light": 453722442,
+      "motion_blur": 65766587,
+      "occlusion": 1617325515
+    },
+    "davis::loading": {
+      "frame_drops": 2090857880,
+      "gaussian_noise": 1748329050,
+      "low_light": 1956440432,
+      "motion_blur": 635581973,
+      "occlusion": 629033756
+    },
+    "davis::mbike-trick": {
+      "frame_drops": 199453172,
+      "gaussian_noise": 1898126186,
+      "low_light": 752639661,
+      "motion_blur": 1639638140,
+      "occlusion": 1203552427
+    },
+    "davis::motocross-jump": {
+      "frame_drops": 2145639691,
+      "gaussian_noise": 722999453,
+      "low_light": 1319233108,
+      "motion_blur": 872191532,
+      "occlusion": 381461819
+    },
+    "davis::paragliding-launch": {
+      "frame_drops": 30899084,
+      "gaussian_noise": 507818344,
+      "low_light": 1179882204,
+      "motion_blur": 384156190,
+      "occlusion": 2091823310
+    },
+    "davis::parkour": {
+      "frame_drops": 320597499,
+      "gaussian_noise": 1561927263,
+      "low_light": 1783312896,
+      "motion_blur": 221125797,
+      "occlusion": 694203651
+    },
+    "davis::pigs": {
+      "frame_drops": 1240526562,
+      "gaussian_noise": 854419626,
+      "low_light": 857752077,
+      "motion_blur": 1923769336,
+      "occlusion": 294756042
+    },
+    "davis::scooter-black": {
+      "frame_drops": 1297673411,
+      "gaussian_noise": 1679402308,
+      "low_light": 998556974,
+      "motion_blur": 708983894,
+      "occlusion": 1119883027
+    },
+    "davis::shooting": {
+      "frame_drops": 1398333203,
+      "gaussian_noise": 492535438,
+      "low_light": 695296765,
+      "motion_blur": 1726983819,
+      "occlusion": 1542189283
+    },
+    "davis::soapbox": {
+      "frame_drops": 1029855619,
+      "gaussian_noise": 1067589403,
+      "low_light": 2057409138,
+      "motion_blur": 377967415,
+      "occlusion": 1982156921
+    }
+  }
+}
