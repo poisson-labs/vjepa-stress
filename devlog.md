@@ -1715,3 +1715,113 @@ load both sweeps via `load_shards("runs/sweep-b077627")` and
 schema-v1.2 readers.
 
 ---
+
+## 2026-04-29 — Pod tear-down
+
+This is the project's closeout entry. Both sweeps are complete, all
+six hypotheses have verdicts, the DAVIS gallery is rendered, and the
+canonical state is fully mirrored to local disk. The pod can be torn
+down.
+
+### Final git state
+
+- Local HEAD: `f1f9979` — `analysis: Stage 5 figures, tables, and
+  notebook for sweep-b077627`
+- `origin/main`: `f1f9979` — match (pushed)
+- Pod HEAD: `9fb565d` (the schema-v1.2 wiring commit). The pod is
+  behind because it can't pull from `github.com` (no key forwarded)
+  and was never updated after the initial sweep launch. **All shards
+  and analysis artifacts that originated on the pod have been
+  rsync'd back and committed locally.** Nothing on the pod is
+  uniquely-held — the pod can be destroyed without data loss.
+
+### Compute & cost
+
+| sweep                  | wallclock     | row count | model load + encode time |
+|------------------------|---------------|-----------|--------------------------|
+| `sweep-b077627` (SSv2) | 6,729.7 s (1.870 h) | 44,400 | end-to-end               |
+| `sweep-davis-9fb565d`  | 1,447 s (0.402 h)   |  3,000 | end-to-end (24:07)       |
+| **TOTAL**              | **8,176.7 s (2.272 h)** | **47,400** | —                  |
+
+GPU cost @ $1.89/hr: **$4.29**.
+
+(The DAVIS row-sum of `wallclock_sec` is 582.4 s, which excludes the
+4 encoder-load events and the per-cell encode time. End-to-end is
+the cost-relevant figure since the user pays for the box during
+encoder loads too.)
+
+### Disk state at tear-down
+
+From the pod (`du -sh /workspace/...`):
+
+| path                                | size  | notes                               |
+|-------------------------------------|-------|-------------------------------------|
+| `/workspace/data/ssv2`              |  19 G | validation subset, manually fetched |
+| `/workspace/data/davis_raw`         | 1.9 G | DAVIS-2017-trainval-480p extracted  |
+| `/workspace/.cache/torch`           |  51 G | V-JEPA 2.1 weights (4 variants)     |
+| `/workspace/vjepa-stress/runs`      | 9.9 M | both sweep dirs                     |
+| `/workspace` filesystem             |  1.2 P / 76% used | MooseFS (shared across pods)|
+
+The 51 GB torch hub cache is the big-ticket item; it's persistent on
+MooseFS so it'll be available immediately if the project is ever
+restarted on the same network. The SSv2 fetch took ~1 h on the
+original first-run; restoring DAVIS is `unzip` from the manually
+downloaded archive at `/workspace/data/davis_raw/`.
+
+### What landed in this final session
+
+- **DAVIS sweep & H5 verdict (sweep-davis-9fb565d).** Pearson
+  `r(ΔM3, M2) = +0.16` across n=3,000 → REFUTED; per-perturbation
+  splits give frame_drops r=+0.37 and occlusion r=+0.35 in the
+  ambiguous band, while the image-noise family (Gaussian, motion
+  blur, low-light) is essentially uncorrelated. Verdict numbers
+  reproduced from `scripts/h5_verdict.py runs/sweep-davis-9fb565d`.
+- **Stage 5 closeout (devlog 2026-04-29 entry).** H1 confirmed,
+  H2 partial (M2 confirmed, M1 component withdrawn as ill-defined
+  on time-axis-reorganizing perturbations), H3 refuted, H4 refuted
+  with direction reversed, H6 confirmed (5/5 Tier-1 perturbations
+  show non-monotonic robustness in model size). Notebook + figures
+  + hypothesis tables shipped under `notebooks/`, `figures/`,
+  `analysis/`.
+- **R1 case-study gallery.** Top-3-per-category from
+  `analysis/case_study_candidates.csv` rendered as side-by-side
+  PNGs using the exact manifest seeds. Twenty-seven PNGs at
+  `figures/case_study_*.png`. Verdict in
+  `analysis/case_study_verification.md`: keep `video_id=202588`
+  as a body callout, but the recommended *hero* image is
+  `case_study_41267_frame_drops_0.900_sidebyside.png` (knife
+  slicing an orange / whole orange), which captures the freezing
+  mechanism in a single frame. Not a perturbation library bug.
+- **Cross-model collapse confirmation for `video_id=202588`.**
+  All four models collapse on M2 to within < 0.5% (0.977–0.981);
+  the earlier "three of four" framing is corrected to "four of
+  four on M2". On M1 the picture is more nuanced: large/giant/
+  gigantic at ~0.6, base at 0.35.
+
+### Anything left undone (per the original plan)
+
+- **The post itself.** Out of scope for this repo's coding agent;
+  copywriting/voice happens elsewhere. The data, the figures, the
+  case-study gallery, and the verdict tables that the post will draw
+  on are all committed and reproducible from the same SHA as the
+  code that produced them.
+- **Methodology revision in `RESEARCH.md` §3.1.** Already in
+  (commit `fb15e63`). M1 is flagged as ill-defined for `reverse`
+  and `frame_drops` cells; future analysis should omit M1 reporting
+  on those.
+- **One-frame-only renders for `121085 frame_drops s=1.0`.** Frame
+  index 8 happens not to be a dropped frame for that seed, so the
+  single-frame side-by-side hides the perturbation. This is honest
+  (the encoder *did* see that exact frame unaltered at index 8;
+  the drops happened elsewhere in the clip), but if the post wants
+  to use 121085 specifically, render multiple frame indices instead
+  of just 8. Logged in the gallery table.
+
+### Final state
+
+The experiment is **complete**. Two sweeps, six hypotheses with
+verdicts, one case-study gallery, ~$4.30 of GPU. All canonical
+artifacts live at `f1f9979` on `origin/main`. The pod is no longer
+load-bearing.
+
+---
