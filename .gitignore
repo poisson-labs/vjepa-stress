@@ -23,8 +23,14 @@ dist/
 /data/
 !/data/.gitkeep
 /checkpoints/
-*.parquet
 *.zip
+
+# Sweep run artifacts: committed by default (the metrics shards are small —
+# ~12 KB each, ~3 MB per 222-cell sweep — and they're the canonical
+# pre-registered evidence the manifest.json + code_commit columns refer to.
+# Reproducibility lives or dies on these being inspectable from the same
+# Git revision as the code. Selectively gitignore individual exploratory
+# runs (e.g. /runs/scratch-*/) if any one of them ever bloats the repo.
 
 # OS / editor
 .DS_Store
