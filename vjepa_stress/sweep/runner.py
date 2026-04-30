@@ -8,17 +8,23 @@ metric, model, dataset). It is intentionally thin:
 2. Group cells by ``model`` so each encoder is loaded **once**, no matter
    how many cells reference it.
 3. For each cell, iterate the video dataset, apply the perturbation,
-   encode clean+perturbed, compute M1/M2 (M3 is left NaN until DAVIS
-   masks land in Stage 0.6).
+   encode clean+perturbed, compute M1/M2 (and, for DAVIS cells, m3_clean
+   + m3_perturbed via :func:`compute_m3_for_clip`).
 4. Write one Parquet shard per cell, atomically.
 
 The runner takes its dependencies through ``RunnerConfig`` factories so
 the same code path drives both the test suite (with fakes) and a real
 sweep (with V-JEPA + SSv2/DAVIS).
+
+**Dataset dispatch.** A cell carries a ``dataset`` axis (``"ssv2"`` or
+``"davis"``); the runner resolves which factory to call per cell. The
+legacy ``dataset_factory`` field stays as the default for SSv2 + tests,
+and ``ssv2_factory`` / ``davis_factory`` override per-axis when present.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import time
@@ -31,6 +37,7 @@ import torch
 from tqdm import tqdm
 
 from vjepa_stress.metrics import compute_m1, compute_m2
+from vjepa_stress.metrics.m3_correspondence import compute_m3_for_clip
 from vjepa_stress.perturbations import Perturbation, all_perturbations
 from vjepa_stress.sweep.checkpoint import (
     cell_completed,
@@ -81,11 +88,22 @@ DatasetFactory = Callable[[], _DatasetProtocol]
 
 @dataclass
 class RunnerConfig:
-    """Everything the runner needs to execute a (subset of the) matrix."""
+    """Everything the runner needs to execute a (subset of the) matrix.
+
+    ``dataset_factory`` is the legacy single-dataset entry point and is
+    used for any cell whose ``dataset`` axis lacks a specific factory.
+    ``ssv2_factory`` / ``davis_factory`` override per-axis when set; that
+    is what the DAVIS / H5 sweep wires up to point at the real DAVIS
+    loader while the SSv2 axis stays on the SSv2 loader. At least one of
+    ``dataset_factory`` or the per-axis factories must resolve a cell's
+    dataset, or the runner raises a ``KeyError`` at iteration time.
+    """
 
     output_dir: Path
     encoder_factory: EncoderFactory
-    dataset_factory: DatasetFactory
+    dataset_factory: DatasetFactory | None = None
+    ssv2_factory: DatasetFactory | None = None
+    davis_factory: DatasetFactory | None = None
     master_seed: int = 20260427
     resume: bool = True
     inject_crash_after_cell: str | None = None
@@ -94,6 +112,37 @@ class RunnerConfig:
     perturbations: dict[str, Perturbation] = field(
         default_factory=lambda: {p.name: p for p in all_perturbations()}
     )
+
+    def __post_init__(self) -> None:
+        # The runner needs *some* way to materialize a dataset; an entirely
+        # empty config is a programmer bug, not a runtime fallback.
+        if (
+            self.dataset_factory is None
+            and self.ssv2_factory is None
+            and self.davis_factory is None
+        ):
+            raise ValueError(
+                "RunnerConfig requires at least one of dataset_factory, "
+                "ssv2_factory, or davis_factory."
+            )
+
+    def factory_for_dataset(self, dataset: str) -> DatasetFactory:
+        """Resolve the dataset factory for a cell's dataset axis.
+
+        Per-axis factory wins; falls back to the legacy ``dataset_factory``
+        when present. Raises if no factory covers the axis — the caller
+        (the runner) should treat this as a hard configuration error.
+        """
+        if dataset == "ssv2" and self.ssv2_factory is not None:
+            return self.ssv2_factory
+        if dataset == "davis" and self.davis_factory is not None:
+            return self.davis_factory
+        if self.dataset_factory is not None:
+            return self.dataset_factory
+        raise KeyError(
+            f"No factory configured for dataset={dataset!r}; set "
+            f"RunnerConfig.{dataset}_factory or .dataset_factory."
+        )
 
 
 @dataclass
@@ -128,6 +177,43 @@ def _all_perturbation_names(cells: Iterable[Cell]) -> list[str]:
             seen.add(c.perturbation)
             out.append(c.perturbation)
     return out
+
+
+def _all_dataset_axes(cells: Iterable[Cell]) -> list[str]:
+    """Return the dataset axes referenced by ``cells`` in canonical order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in cells:
+        if c.dataset not in seen:
+            seen.add(c.dataset)
+            out.append(c.dataset)
+    return out
+
+
+def _collect_video_ids(
+    config: RunnerConfig, cells: list[Cell]
+) -> list[str]:
+    """Resolve the union of video_ids across the dataset axes the cells touch.
+
+    DAVIS cells get ``davis::<sequence_id>`` so they never collide with
+    SSv2 cells in the manifest's seed dict — the perturbation seed is
+    keyed on (video_id, perturbation_name) and the same sequence name
+    could conceivably show up in both datasets.
+    """
+    out: list[str] = []
+    for axis in _all_dataset_axes(cells):
+        factory = config.factory_for_dataset(axis)
+        ds = factory()
+        for vid in ds.video_ids():
+            tagged = vid if axis == "ssv2" else f"{axis}::{vid}"
+            if tagged not in out:
+                out.append(tagged)
+    return out
+
+
+def _manifest_video_id(dataset: str, video_id: str) -> str:
+    """Map a per-dataset video id to its manifest-seed key."""
+    return video_id if dataset == "ssv2" else f"{dataset}::{video_id}"
 
 
 def _ensure_manifest(
@@ -185,17 +271,40 @@ def _features_to_token_grid(
     return features
 
 
+def _m3_seed_for_video(video_id: str) -> int:
+    """Per-video M3 keypoint seed, *independent* of the perturbation seed.
+
+    H5 needs M3 to be evaluated against the same set of keypoints on the
+    clean and perturbed clip — otherwise ΔM3 mixes "the encoder drifted"
+    with "we tracked a different mask region this time". The seed is a
+    deterministic function of ``video_id`` only.
+    """
+    h = hashlib.blake2b(video_id.encode("utf-8"), digest_size=8)
+    return int.from_bytes(h.digest(), "little") & ((1 << 31) - 1)
+
+
 def _compute_metrics_for_cell(
     cell: Cell,
     frames_clean: np.ndarray,
     frames_perturbed: np.ndarray,
     encoder: _EncoderProtocol,
-) -> tuple[float, float, float]:
-    """Encode clean+perturbed and return ``(m1, m2, m3)``.
+    *,
+    masks: np.ndarray | None = None,
+    video_id: str | None = None,
+) -> tuple[float, float, float, float]:
+    """Encode clean+perturbed and return ``(m1, m2, m3_clean, m3_perturbed)``.
 
-    M3 is NaN until DAVIS masks are wired up (Stage 0.6). The Parquet
-    schema stores it as a float, so ``math.nan`` is the right placeholder
-    — readers that aggregate M3 will simply ignore those rows.
+    For SSv2 cells (``masks is None``), m3_clean and m3_perturbed are
+    NaN — M3 requires per-frame instance masks, which SSv2 does not
+    have. The Parquet schema stores both as float64, so ``math.nan`` is
+    the right placeholder.
+
+    For DAVIS cells (``masks is not None``), both M3 readings are
+    computed against the *original* ground-truth masks. ``ΔM3 =
+    m3_clean − m3_perturbed`` is then the LHS of the H5 Pearson r —
+    the perturbed run's degradation against fixed ground truth.
+    Keypoints share a seed (``video_id``-derived) so the same patches
+    are tracked in both runs.
     """
     expected_t_clean = encoder.output_temporal_dim(frames_clean.shape[0])
     expected_t_perturb = encoder.output_temporal_dim(frames_perturbed.shape[0])
@@ -211,8 +320,32 @@ def _compute_metrics_for_cell(
         m2 = float(compute_m2(feats_clean, feats_perturbed).item())
     else:
         m2 = math.nan
-    m3 = math.nan
-    return m1, m2, m3
+
+    if masks is None:
+        return m1, m2, math.nan, math.nan
+
+    if video_id is None:
+        raise ValueError(
+            "video_id is required when masks are provided (M3 keypoint seed)"
+        )
+    seed_m3 = _m3_seed_for_video(video_id)
+    m3_clean = float(
+        compute_m3_for_clip(
+            features=feats_clean,
+            masks=masks,
+            tubelet_size=encoder.tubelet_size,
+            seed=seed_m3,
+        ).item()
+    )
+    m3_perturbed = float(
+        compute_m3_for_clip(
+            features=feats_perturbed,
+            masks=masks,
+            tubelet_size=encoder.tubelet_size,
+            seed=seed_m3,
+        ).item()
+    )
+    return m1, m2, m3_clean, m3_perturbed
 
 
 def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
@@ -221,8 +354,10 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
     output_dir.mkdir(parents=True, exist_ok=True)
     cleanup_stale_tmp(output_dir)
 
-    dataset = config.dataset_factory()
-    video_ids = list(dataset.video_ids())
+    # Resolve per-axis video_ids for the manifest before any cell runs;
+    # this ensures resume re-uses the same seed table even on a slice
+    # that only covers some axes of the original sweep.
+    video_ids = _collect_video_ids(config, cells)
 
     manifest = _ensure_manifest(config, cells, video_ids)
 
@@ -254,16 +389,21 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
                 encoder = config.encoder_factory(model_name)
 
             # Re-iterate the dataset for each cell so we don't hold T*P*D
-            # tensors across all videos in memory at once.
-            iterator = config.dataset_factory()
+            # tensors across all videos in memory at once. Dataset axis
+            # is resolved per cell so a single config can serve mixed
+            # SSv2 + DAVIS slices.
+            factory = config.factory_for_dataset(cell.dataset)
+            iterator = factory()
             rows: list[Row] = []
             cuda_available = torch.cuda.is_available()
             for video in iterator:
-                seed = lookup_seed(manifest, video.video_id, cell.perturbation)
+                manifest_vid = _manifest_video_id(cell.dataset, video.video_id)
+                seed = lookup_seed(manifest, manifest_vid, cell.perturbation)
                 frames_clean = np.ascontiguousarray(video.frames)
                 frames_perturbed = perturbation.apply(
                     frames_clean, strength=cell.strength, seed=seed
                 )
+                masks = getattr(video, "masks", None) if cell.dataset == "davis" else None
                 # Per-(cell, video) wallclock around the encode pair +
                 # metrics. CUDA work is async, so synchronize on both ends
                 # when a GPU is present — otherwise we'd be timing kernel
@@ -271,8 +411,13 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
                 if cuda_available:
                     torch.cuda.synchronize()
                 t_start = time.perf_counter()
-                m1, m2, m3 = _compute_metrics_for_cell(
-                    cell, frames_clean, frames_perturbed, encoder
+                m1, m2, m3_clean, m3_perturbed = _compute_metrics_for_cell(
+                    cell,
+                    frames_clean,
+                    frames_perturbed,
+                    encoder,
+                    masks=masks,
+                    video_id=video.video_id,
                 )
                 if cuda_available:
                     torch.cuda.synchronize()
@@ -281,6 +426,7 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
                     Row(
                         cell_id=cell.cell_id,
                         tier=cell.tier,
+                        dataset=cell.dataset,
                         model=cell.model,
                         perturbation=cell.perturbation,
                         strength=float(cell.strength),
@@ -288,7 +434,8 @@ def run_sweep(config: RunnerConfig, cells: list[Cell]) -> RunSummary:
                         seed=seed,
                         m1=m1,
                         m2=m2,
-                        m3=m3,
+                        m3_clean=m3_clean,
+                        m3_perturbed=m3_perturbed,
                         wallclock_sec=wallclock_sec,
                     )
                 )

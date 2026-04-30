@@ -8,15 +8,21 @@ real datasets. The non-negotiable assertions are:
   that model (``forward_calls`` math).
 - A crashed run resumes idempotently — re-running the same config
   re-writes nothing.
+- Dataset axis dispatch: SSv2 cells use ``ssv2_factory``, DAVIS cells
+  use ``davis_factory``, and DAVIS rows carry m3_clean / m3_perturbed
+  in [0, 1].
 """
 
 from __future__ import annotations
 
 import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 from unittest import mock
 
+import numpy as np
 import pytest
 
 from vjepa_stress.sweep.checkpoint import cell_completed, load_shards, shard_path
@@ -28,7 +34,7 @@ from vjepa_stress.sweep.runner import (
     run_sweep,
 )
 from vjepa_stress.sweep.schema import ARROW_SCHEMA, SCHEMA_VERSION
-from vjepa_stress.testing.fakes import FakeEncoder, FakeVideoDataset
+from vjepa_stress.testing.fakes import FakeEncoder, FakeVideo, FakeVideoDataset
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +131,11 @@ def test_identity_probe_yields_zero_metrics(tmp_path: Path):
     assert len(df) == 4
     assert (df["m1"].abs() < 1e-6).all()
     assert (df["m2"].abs() < 1e-6).all()
-    assert df["m3"].apply(math.isnan).all()
+    # SSv2 cells: M3 is masks-required-only and stays NaN on both columns.
+    assert df["m3_clean"].apply(math.isnan).all()
+    assert df["m3_perturbed"].apply(math.isnan).all()
+    # Default dataset axis is ssv2.
+    assert (df["dataset"] == "ssv2").all()
 
 
 def test_skips_completed_cells_on_resume(tmp_path: Path):
@@ -269,3 +279,158 @@ def test_manifest_records_schema_version_and_seeds(tmp_path: Path):
     assert "fake_0000" in manifest.seeds
     assert "gaussian_noise" in manifest.seeds["fake_0000"]
     assert isinstance(manifest.seeds["fake_0000"]["gaussian_noise"], int)
+
+
+# ---------------------------------------------------------------------------
+# Dataset axis dispatch (Schema v1.2 / DAVIS / H5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FakeDavisVideo:
+    """Mimics ``DAVISSample``: frames + per-frame masks + video_id."""
+
+    video_id: str
+    frames: np.ndarray  # (T, H, W, 3) uint8
+    masks: np.ndarray  # (T, H, W) int32
+
+
+class _FakeDavisDataset:
+    """Fake DAVIS-shaped iterable: yields a foreground mask covering the
+    middle of every frame so M3 has something to track."""
+
+    def __init__(self, n_videos: int = 2, num_frames: int = 4, image_size: int = 32):
+        self.n = n_videos
+        self.num_frames = num_frames
+        self.image_size = image_size
+
+    def video_ids(self) -> list[str]:
+        return [f"davis_seq_{i:02d}" for i in range(self.n)]
+
+    def __iter__(self) -> Iterator[_FakeDavisVideo]:
+        for i in range(self.n):
+            rng = np.random.default_rng(i + 1)
+            frames = rng.integers(
+                0,
+                256,
+                size=(self.num_frames, self.image_size, self.image_size, 3),
+                dtype=np.uint8,
+            )
+            masks = np.zeros(
+                (self.num_frames, self.image_size, self.image_size), dtype=np.int32
+            )
+            half = self.image_size // 2
+            quarter = self.image_size // 4
+            masks[:, quarter : quarter + half, quarter : quarter + half] = 1
+            yield _FakeDavisVideo(
+                video_id=f"davis_seq_{i:02d}",
+                frames=frames,
+                masks=masks,
+            )
+
+
+def _make_dual_axis_config(
+    output_dir: Path, *, n_videos: int = 2, encoder_log: list[str] | None = None
+) -> RunnerConfig:
+    """RunnerConfig wired to *both* SSv2 (FakeVideoDataset) and DAVIS (fake)
+    factories. Tests that touch only one axis still work."""
+
+    def encoder_factory(model_name: str) -> FakeEncoder:
+        if encoder_log is not None:
+            encoder_log.append(model_name)
+        return FakeEncoder(model_name)
+
+    def ssv2_factory() -> FakeVideoDataset:
+        return FakeVideoDataset(
+            dataset_name="fake",
+            n_videos=n_videos,
+            num_frames=4,
+            image_size=32,
+            seed=0,
+        )
+
+    def davis_factory() -> _FakeDavisDataset:
+        return _FakeDavisDataset(
+            n_videos=n_videos, num_frames=4, image_size=32
+        )
+
+    return RunnerConfig(
+        output_dir=output_dir,
+        encoder_factory=encoder_factory,
+        ssv2_factory=ssv2_factory,
+        davis_factory=davis_factory,
+        master_seed=20260427,
+    )
+
+
+def test_runner_config_requires_some_factory():
+    """Empty config = programmer bug, not a soft fallback."""
+    with pytest.raises(ValueError):
+        RunnerConfig(
+            output_dir=Path("/tmp"),
+            encoder_factory=lambda _name: FakeEncoder(_name),
+        )
+
+
+def test_runner_dispatches_ssv2_vs_davis_axis(tmp_path: Path):
+    ssv2_cell = Cell(
+        model="vjepa-2.1-vit-base",
+        perturbation="gaussian_noise",
+        strength=0.5,
+        tier=1,
+        dataset="ssv2",
+    )
+    davis_cell = Cell(
+        model="vjepa-2.1-vit-base",
+        perturbation="gaussian_noise",
+        strength=0.5,
+        tier=1,
+        dataset="davis",
+    )
+    config = _make_dual_axis_config(tmp_path, n_videos=2)
+    summary = run_sweep(config, cells=[ssv2_cell, davis_cell])
+
+    assert summary.cells_written == 2
+    assert summary.rows_written == 4
+
+    df = load_shards(tmp_path).df()
+    ssv2_rows = df[df["dataset"] == "ssv2"]
+    davis_rows = df[df["dataset"] == "davis"]
+    assert len(ssv2_rows) == 2
+    assert len(davis_rows) == 2
+
+    # SSv2 rows: M3 stays NaN (no masks).
+    assert ssv2_rows["m3_clean"].apply(math.isnan).all()
+    assert ssv2_rows["m3_perturbed"].apply(math.isnan).all()
+    # DAVIS rows: M3 in [0, 1].
+    assert davis_rows["m3_clean"].apply(math.isfinite).all()
+    assert davis_rows["m3_perturbed"].apply(math.isfinite).all()
+    assert (davis_rows["m3_clean"] >= 0.0).all()
+    assert (davis_rows["m3_clean"] <= 1.0).all()
+    assert (davis_rows["m3_perturbed"] >= 0.0).all()
+    assert (davis_rows["m3_perturbed"] <= 1.0).all()
+
+    # Video_id space is dataset-scoped; DAVIS rows should carry the
+    # davis_seq_* ids while SSv2 rows carry fake_*.
+    assert all(v.startswith("fake_") for v in ssv2_rows["video_id"])
+    assert all(v.startswith("davis_seq_") for v in davis_rows["video_id"])
+
+
+def test_runner_davis_identity_perturbation_clean_equals_perturbed(tmp_path: Path):
+    """The H5 invariant: same encoder + same masks + same keypoint seed
+    means an identity perturbation produces m3_clean == m3_perturbed."""
+    cell = Cell(
+        model="vjepa-2.1-vit-base",
+        perturbation="identity",
+        strength=1.0,
+        tier=2,
+        dataset="davis",
+    )
+    config = _make_dual_axis_config(tmp_path, n_videos=2)
+    run_sweep(config, cells=[cell])
+    df = load_shards(tmp_path).df()
+    assert len(df) == 2
+    for _, row in df.iterrows():
+        assert math.isfinite(row["m3_clean"])
+        assert math.isfinite(row["m3_perturbed"])
+        assert row["m3_clean"] == row["m3_perturbed"]

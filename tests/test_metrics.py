@@ -9,9 +9,17 @@
 
 from __future__ import annotations
 
+import math
+
+import numpy as np
+import pytest
 import torch
 
 from vjepa_stress.metrics import compute_m1, compute_m2, compute_m3
+from vjepa_stress.metrics.m3_correspondence import (
+    _tubelet_pool_masks,
+    compute_m3_for_clip,
+)
 
 
 def _features(t: int = 8, p: int = 16, d: int = 32) -> torch.Tensor:
@@ -104,3 +112,82 @@ def test_m3_returns_nan_when_no_instances():
     masks = torch.zeros(t, h_img, w_img, dtype=torch.long)
     out = compute_m3(f, masks, keypoints_per_mask=4)
     assert torch.isnan(out)
+
+
+# ---------------------------------------------------------------------------
+# M3 adapter — compute_m3_for_clip
+# ---------------------------------------------------------------------------
+
+
+def test_tubelet_pool_masks_size_one_is_identity():
+    masks = np.random.default_rng(0).integers(0, 3, size=(8, 16, 16), dtype=np.int32)
+    pooled = _tubelet_pool_masks(masks, 1)
+    assert pooled.shape == (8, 16, 16)
+    assert pooled.dtype == torch.int32
+    assert torch.equal(pooled, torch.from_numpy(masks))
+
+
+def test_tubelet_pool_masks_takes_per_pixel_max():
+    """Per-pixel max means any-frame foreground stays foreground in the pool."""
+    masks = np.zeros((4, 4, 4), dtype=np.int32)
+    masks[0, 0, 0] = 5
+    masks[1, 0, 0] = 0
+    masks[2, 1, 1] = 7
+    masks[3, 1, 1] = 0
+    pooled = _tubelet_pool_masks(masks, 2)
+    assert pooled.shape == (2, 4, 4)
+    assert pooled[0, 0, 0].item() == 5
+    assert pooled[1, 1, 1].item() == 7
+
+
+def test_tubelet_pool_masks_rejects_wrong_T():
+    masks = np.zeros((5, 4, 4), dtype=np.int32)
+    with pytest.raises(ValueError):
+        _tubelet_pool_masks(masks, 2)
+
+
+def test_compute_m3_for_clip_reshapes_token_grid_correctly():
+    """Adapter feeds (T_tubelet, P, D) features and pools masks to T_tubelet."""
+    t_tubelet, side, d = 4, 6, 16
+    p = side * side
+    g = torch.Generator().manual_seed(0)
+    feats = torch.randn(t_tubelet, p, d, generator=g)  # not pre-normalized
+    # 8 source frames -> tubelet_size=2 -> 4 pooled time steps
+    h_img = w_img = 96
+    masks = np.zeros((8, h_img, w_img), dtype=np.int32)
+    masks[:, 30:60, 30:60] = 1  # full instance present in every frame
+    out = compute_m3_for_clip(
+        features=feats,
+        masks=masks,
+        tubelet_size=2,
+        keypoints_per_mask=4,
+        seed=0,
+    )
+    assert torch.is_tensor(out)
+    assert math.isfinite(out.item())
+    assert 0.0 <= out.item() <= 1.0
+
+
+def test_compute_m3_for_clip_keypoint_seed_pins_clean_perturbed_match():
+    """Same seed + same features → identical M3 (the H5 invariant)."""
+    t_tubelet, side, d = 4, 6, 16
+    p = side * side
+    g = torch.Generator().manual_seed(7)
+    feats = torch.randn(t_tubelet, p, d, generator=g)
+    masks = np.zeros((8, 96, 96), dtype=np.int32)
+    masks[:, 20:80, 20:80] = 1
+    out_a = compute_m3_for_clip(
+        features=feats, masks=masks, tubelet_size=2, seed=42
+    )
+    out_b = compute_m3_for_clip(
+        features=feats, masks=masks, tubelet_size=2, seed=42
+    )
+    assert out_a.item() == out_b.item()
+
+
+def test_compute_m3_for_clip_rejects_non_square_grid():
+    feats = torch.randn(4, 17, 16)  # 17 patches: not a perfect square
+    masks = np.zeros((4, 32, 32), dtype=np.int32)
+    masks[:, 5:25, 5:25] = 1
+    with pytest.raises(ValueError):
+        compute_m3_for_clip(features=feats, masks=masks, tubelet_size=1)

@@ -14,9 +14,10 @@ to assert the metric contract:
 - ``m2`` is finite and strictly positive (T_tubelet=8 ≥ 2, so M2 is
   computed; reverse-of-clean would also be the wrong number here, hence
   ``> 0``).
-- ``m3`` is NaN — DAVIS masks aren't wired into the runner yet, and the
-  schema reserves ``math.nan`` for that placeholder (devlog 2026-04-27,
-  Task 5). This stays NaN until M3 plumbing lands.
+- ``m3_clean`` / ``m3_perturbed`` are both NaN — SSv2 cells lack the
+  per-frame instance masks M3 requires; the schema reserves ``math.nan``
+  for that case (DAVIS cells get finite values via
+  :func:`vjepa_stress.metrics.m3_correspondence.compute_m3_for_clip`).
 
 The test soft-skips when no SSv2 tree is reachable from the resolved
 cache root, mirroring the SSv2 loader's manual-download contract. On a
@@ -105,8 +106,12 @@ def test_smoke_real_pipeline(tmp_path: Path):
         f"gaussian_noise should produce strictly positive m2; got {m2_vals}"
     )
 
-    # M3 stays NaN until DAVIS masks are wired into the runner.
-    m3_vals = df["m3"].tolist()
-    assert all(math.isnan(v) for v in m3_vals), (
-        f"m3 should be NaN until DAVIS plumbing lands; got {m3_vals}"
+    # SSv2 cells: both M3 columns are NaN (M3 requires DAVIS masks).
+    m3_clean_vals = df["m3_clean"].tolist()
+    m3_perturbed_vals = df["m3_perturbed"].tolist()
+    assert all(math.isnan(v) for v in m3_clean_vals), (
+        f"m3_clean should be NaN on SSv2 cells; got {m3_clean_vals}"
+    )
+    assert all(math.isnan(v) for v in m3_perturbed_vals), (
+        f"m3_perturbed should be NaN on SSv2 cells; got {m3_perturbed_vals}"
     )

@@ -24,6 +24,7 @@ def _example_row(**overrides) -> dict:
     base = {
         "cell_id": "t1__vjepa-2.1-vit-base__gaussian_noise__s0.1000",
         "tier": 1,
+        "dataset": "ssv2",
         "model": "vjepa-2.1-vit-base",
         "perturbation": "gaussian_noise",
         "strength": 0.1,
@@ -31,7 +32,8 @@ def _example_row(**overrides) -> dict:
         "seed": 12345,
         "m1": 0.42,
         "m2": 0.17,
-        "m3": float("nan"),
+        "m3_clean": float("nan"),
+        "m3_perturbed": float("nan"),
         "wallclock_sec": 1.234,
         "notes": "",
     }
@@ -88,21 +90,28 @@ def test_nan_m3_round_trips_through_parquet(tmp_path: Path):
 
     read_back = pq.read_table(out)
     assert read_back.schema == ARROW_SCHEMA
-    m3_col = read_back.column("m3").to_pylist()
-    assert len(m3_col) == 1
-    assert math.isnan(m3_col[0])
+    for col in ("m3_clean", "m3_perturbed"):
+        values = read_back.column(col).to_pylist()
+        assert len(values) == 1
+        assert math.isnan(values[0])
 
 
 def test_full_round_trip_through_duckdb(tmp_path: Path):
     payload = [
-        Row(**_example_row(m1=0.0, m2=0.0, m3=float("nan"))),
         Row(
             **_example_row(
-                cell_id="t1__vjepa-2.1-vit-base__gaussian_noise__s0.5000",
+                m1=0.0, m2=0.0, m3_clean=float("nan"), m3_perturbed=float("nan")
+            )
+        ),
+        Row(
+            **_example_row(
+                cell_id="t1__davis__vjepa-2.1-vit-base__gaussian_noise__s0.5000",
+                dataset="davis",
                 strength=0.5,
                 m1=0.3,
                 m2=0.2,
-                m3=0.95,
+                m3_clean=0.95,
+                m3_perturbed=0.71,
             )
         ),
     ]
@@ -153,9 +162,34 @@ def test_wallclock_sec_required():
         validate_row(bad)
 
 
-def test_schema_version_is_one_one():
+def test_schema_version_is_one_two():
     """Tripwire: forces a deliberate touch of this test on the next bump."""
-    assert SCHEMA_VERSION == "1.1"
+    assert SCHEMA_VERSION == "1.2"
+
+
+def test_dataset_axis_required_and_validated():
+    """Schema v1.2: dataset is required and must be 'ssv2' or 'davis'."""
+    bad = _example_row()
+    del bad["dataset"]
+    with pytest.raises(ValidationError):
+        validate_row(bad)
+    with pytest.raises(ValidationError):
+        validate_row(_example_row(dataset="kinetics"))
+
+
+def test_m3_split_columns_required():
+    """v1.2 break: writers must populate m3_clean + m3_perturbed (legacy m3 dropped)."""
+    bad = _example_row()
+    del bad["m3_clean"]
+    with pytest.raises(ValidationError):
+        validate_row(bad)
+    bad2 = _example_row()
+    del bad2["m3_perturbed"]
+    with pytest.raises(ValidationError):
+        validate_row(bad2)
+    # Legacy ``m3`` is now an unexpected extra under extra="forbid".
+    with pytest.raises(ValidationError):
+        validate_row(_example_row(m3=0.5))
 
 
 def test_schema_version_field_must_match_constant():

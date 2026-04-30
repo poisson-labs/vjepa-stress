@@ -14,6 +14,6 @@ from __future__ import annotations
 
 from vjepa_stress.metrics.m1_drift import compute_m1
 from vjepa_stress.metrics.m2_temporal import compute_m2
-from vjepa_stress.metrics.m3_correspondence import compute_m3
+from vjepa_stress.metrics.m3_correspondence import compute_m3, compute_m3_for_clip
 
-__all__ = ["compute_m1", "compute_m2", "compute_m3"]
+__all__ = ["compute_m1", "compute_m2", "compute_m3", "compute_m3_for_clip"]

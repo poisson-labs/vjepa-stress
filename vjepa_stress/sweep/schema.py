@@ -26,7 +26,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 #:       in seconds. DuckDB tolerates the column being missing on v1.0
 #:       shards (reads as NULL), so mixed-version aggregations still work
 #:       — readers that rely on ``wallclock_sec`` must coalesce.
-SCHEMA_VERSION: str = "1.1"
+#: 1.2 — added ``dataset`` (``"ssv2" | "davis"``); split ``m3`` into
+#:       ``m3_clean`` and ``m3_perturbed`` for the DAVIS / H5 sweep
+#:       (per ``manifests/predictions.md`` H5 — ΔM3 = m3_clean −
+#:       m3_perturbed is the LHS of the Pearson r against M2). Legacy
+#:       ``m3`` column is removed; SSv2 v1.1 shards from sweep-b077627
+#:       remain readable because DuckDB tolerates the column-name
+#:       difference (m3 vs m3_clean/m3_perturbed) under coalesce. SSv2
+#:       cells under v1.2 write NaN to both m3 columns since M3 is
+#:       DAVIS-only.
+SCHEMA_VERSION: str = "1.2"
 
 
 class Row(BaseModel):
@@ -43,6 +52,7 @@ class Row(BaseModel):
     schema_version: str = Field(default=SCHEMA_VERSION)
     cell_id: str
     tier: int = Field(ge=1, le=3)
+    dataset: str
     model: str
     perturbation: str
     strength: float = Field(ge=0.0, le=1.0)
@@ -50,9 +60,19 @@ class Row(BaseModel):
     seed: int
     m1: float
     m2: float
-    m3: float
+    m3_clean: float
+    m3_perturbed: float
     wallclock_sec: float = Field(ge=0.0)
     notes: str = ""
+
+    @field_validator("dataset")
+    @classmethod
+    def _check_dataset(cls, v: str) -> str:
+        if v not in ("ssv2", "davis"):
+            raise ValueError(
+                f"dataset must be 'ssv2' or 'davis'; got {v!r}"
+            )
+        return v
 
     @field_validator("schema_version")
     @classmethod
@@ -71,6 +91,7 @@ ARROW_SCHEMA: pa.Schema = pa.schema(
         pa.field("schema_version", pa.string(), nullable=False),
         pa.field("cell_id", pa.string(), nullable=False),
         pa.field("tier", pa.int32(), nullable=False),
+        pa.field("dataset", pa.string(), nullable=False),
         pa.field("model", pa.string(), nullable=False),
         pa.field("perturbation", pa.string(), nullable=False),
         pa.field("strength", pa.float64(), nullable=False),
@@ -78,7 +99,8 @@ ARROW_SCHEMA: pa.Schema = pa.schema(
         pa.field("seed", pa.int64(), nullable=False),
         pa.field("m1", pa.float64(), nullable=False),
         pa.field("m2", pa.float64(), nullable=False),
-        pa.field("m3", pa.float64(), nullable=False),
+        pa.field("m3_clean", pa.float64(), nullable=False),
+        pa.field("m3_perturbed", pa.float64(), nullable=False),
         pa.field("wallclock_sec", pa.float64(), nullable=False),
         pa.field("notes", pa.string(), nullable=False),
     ]
