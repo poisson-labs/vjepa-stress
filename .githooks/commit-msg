@@ -1,0 +1,27 @@
+#!/bin/sh
+# Reject automated attribution trailers and machine co-authorship in commit messages.
+# Enforces repository policy documented in docs/repo-hygiene.md §2.1.
+# Enabled per clone with: git config core.hooksPath .githooks
+
+msg_file="$1"
+
+# Drop what git strips before committing: everything below a `commit -v` scissors
+# line, then comment lines.
+body=$(sed '/^# -\{24\} >8 -\{24\}$/,$d' "$msg_file" | grep -v '^#')
+
+patterns='^[[:space:]]*co-authored-by:
+^[[:space:]]*(assisted|generated|written|authored|made)-(by|with):
+noreply@(anthropic|openai)\.com
+claude\.(com|ai)/(claude-)?code
+(generated|created|written|authored|assisted|made)( with| by| using)( the help of)? (an? )?(ai|llm|claude|chatgpt|gpt-?[0-9]|openai|copilot|codex|gemini|antigravity|cursor|aider)'
+
+hits=$(printf '%s\n' "$body" | grep -Ein "$patterns")
+robot=$(printf '%s\n' "$body" | grep -Fn '🤖')
+
+if [ -n "$hits$robot" ]; then
+    echo "commit-msg: rejected, the message carries automated attribution trailers or machine co-authorship:" >&2
+    printf '%s\n' "$hits" "$robot" | sed '/^$/d; s/^/  line /' >&2
+    echo "Remove the line(s) and commit again. See docs/repo-hygiene.md §2.1." >&2
+    exit 1
+fi
+exit 0

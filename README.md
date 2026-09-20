@@ -94,6 +94,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -e ".[dev]"
+
+# Enable commit-msg hygiene hook per docs/repo-hygiene.md
+git config core.hooksPath .githooks
 ```
 
 Run test suite sanity checks:
@@ -136,7 +139,7 @@ Detailed instructions for remote GPU environments (e.g. RunPod / Lambda) are pro
 
 ## Repository Index & Artifacts
 
-- **Standard & Hygiene:** [`docs/repo-hygiene.md`](docs/repo-hygiene.md)
+- **Standard & Hygiene:** [`docs/repo-hygiene.md`](docs/repo-hygiene.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`.githooks/commit-msg`](.githooks/commit-msg)
 - **Methodology & Hypotheses:** [`RESEARCH.md`](RESEARCH.md), [`EXPERIMENT.md`](EXPERIMENT.md)
 - **Canonical Findings & Data:**
   - Blog post numbers & CIs: [`analysis/post_numbers.md`](analysis/post_numbers.md)
