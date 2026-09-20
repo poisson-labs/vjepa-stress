@@ -1546,8 +1546,7 @@ M1 came in at 0.358 — well above the H2 prediction of < 0.10.
   the original prediction remains auditable as written.
 
 For the next sweep, M1 reporting on `reverse` and `frame_drops` cells
-should be flagged or omitted; this is a coding-agent ask, logged in
-`analysis/coding_agent_requests.md`.
+should be flagged or omitted; logged as follow-up work for downstream reporting.
 
 ### Surprises worth flagging for the post
 
@@ -1800,7 +1799,7 @@ downloaded archive at `/workspace/data/davis_raw/`.
 
 ### Anything left undone (per the original plan)
 
-- **The post itself.** Out of scope for this repo's coding agent;
+- **The post itself.** Drafted separately for the site;
   copywriting/voice happens elsewhere. The data, the figures, the
   case-study gallery, and the verdict tables that the post will draw
   on are all committed and reproducible from the same SHA as the
@@ -1908,7 +1907,7 @@ verdict backed by Figure 5; the compute story shows the whole sweep
 fits in one tank of gas. No outstanding tasks block the public
 writeup.
 
-R2 (M1 schema scope-aware reporting in `analysis/coding_agent_requests.md`)
+R2 (M1 schema scope-aware reporting)
 remains pending and is non-urgent — it lives in the data-side guard
 layer for the next sweep, not the current report.
 
