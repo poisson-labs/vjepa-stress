@@ -1,0 +1,200 @@
+V-JEPA 2.1 Feature Stability Sweep (vjepa-stress)
+Copyright (c) 2026 Poisson Labs
+
+This product includes software, model weights, and benchmark datasets from third
+parties, listed below. vjepa-stress itself is distributed under the MIT licence;
+see LICENSE.
+
+================================================================================
+V-JEPA 2 and V-JEPA 2.1 Codebase
+================================================================================
+Upstream: https://github.com/facebookresearch/vjepa2
+Source read: https://github.com/facebookresearch/vjepa2/blob/main/LICENSE
+Local cache verified: ~/.cache/torch/hub/facebookresearch_vjepa2_main/LICENSE
+
+MIT License
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+Portions of facebookresearch/vjepa2 licensed under Apache 2.0:
+Source read: https://github.com/facebookresearch/vjepa2/blob/main/README.md
+- src/datasets/utils/video/randaugment.py
+- src/datasets/utils/video/randerase.py
+- src/datasets/utils/worker_init_fn.py
+
+================================================================================
+V-JEPA 2.1 Pretrained Model Weights
+================================================================================
+Upstream: Meta Platforms, Inc.
+Distribution URL: https://dl.fbaipublicfiles.com/vjepa2
+Repository: https://github.com/facebookresearch/vjepa2
+
+Checkpoints used in this sweep:
+- vjepa2_1_vitb_dist_vitG_384.pt (ViT-base, 80M parameters)
+- vjepa2_1_vitl_dist_vitG_384.pt (ViT-large, 300M parameters)
+- vjepa2_1_vitg_dist_vitG_384.pt (ViT-giant, 1B parameters)
+- vjepa2_1_vitG_384.pt (ViT-gigantic, 2B parameters)
+
+Licence terms status:
+Pretrained weights are downloaded dynamically via PyTorch Hub (`torch.hub.load`).
+As verified in the facebookresearch/vjepa2 repository and distribution manifest,
+Meta does not publish a separate standalone model weights licence agreement for
+V-JEPA 2.1; weights are distributed by Meta for research and evaluation in
+conjunction with the open-source repository governed by the MIT License above.
+
+================================================================================
+Benchmark Datasets
+================================================================================
+
+1. DAVIS 2017 (Densely Annotated VIdeo Segmentation)
+   Upstream: https://davischallenge.org/davis2017/code.html
+   Citations:
+     - F. Perazzi, J. Pont-Tuset, B. McWilliams, L. Van Gool, M. Gross,
+       F. Sorkine-Hornung. "A Benchmark Dataset and Evaluation Methodology for
+       Video Object Segmentation", CVPR 2016.
+     - J. Pont-Tuset, F. Perazzi, S. Caelles, P. Arbeláez, A. Sorkine-Hornung,
+       L. Van Gool. "The 2017 DAVIS Challenge on Video Object Segmentation",
+       arXiv:1704.00675, 2017.
+   Licence terms status:
+     Annotations and benchmark video sequences are provided by the DAVIS
+     organizers under Creative Commons Attribution 4.0 International (CC BY 4.0)
+     / CC BY-NC 4.0 terms for academic evaluation. The 30 validation sequences
+     used in this study were retrieved directly from the public DAVIS repository.
+
+2. Something-Something V2 (SSv2)
+   Upstream: Twenty Billion Neurons (TwentyBN) / Qualcomm Technologies, Inc.
+   URL: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk/tools/twentybn-something-something-v2
+   Citation:
+     - R. Goyal et al. "The 'Something Something' Video Database for Learning
+       and Evaluating Visual Common Sense", ICCV 2017.
+   Licence terms status:
+     The SSv2 dataset was originally released by TwentyBN under academic research
+     terms and is currently hosted by Qualcomm under a Research Data License
+     Agreement. Commercial distribution terms could not be verified from the
+     public download and require direct agreement with Qualcomm. The 200 validation
+     subset clips used in this study were evaluated strictly for non-commercial
+     academic benchmarking.
+
+================================================================================
+Third-Party Software Dependencies
+================================================================================
+
+PyTorch (torch)
+https://github.com/pytorch/pytorch
+Licence: BSD 3-Clause
+From PyTorch / Caffe2:
+Copyright (c) 2016- Facebook, Inc (Adam Paszke, Soumith Chintala)
+Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
+Copyright (c) 2012-2014 DeepMind Technologies (Koray Kavukcuoglu)
+Copyright (c) 2015 Google Inc.
+All rights reserved.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions of the BSD 3-Clause
+licence are met.
+
+--------------------------------------------------------------------------------
+Hugging Face Transformers (transformers)
+https://github.com/huggingface/transformers
+Licence: Apache License 2.0
+Copyright 2018- The Hugging Face team. All rights reserved.
+
+--------------------------------------------------------------------------------
+Hugging Face Accelerate (accelerate)
+https://github.com/huggingface/accelerate
+Licence: Apache License 2.0
+Copyright 2021 The HuggingFace Team. All rights reserved.
+
+--------------------------------------------------------------------------------
+PyTorch Image Models (timm)
+https://github.com/huggingface/pytorch-image-models
+Licence: Apache License 2.0
+Copyright 2019- Ross Wightman
+
+--------------------------------------------------------------------------------
+Einops (einops)
+https://github.com/arogozhnikov/einops
+Licence: MIT
+Copyright (c) 2018 Alex Rogozhnikov
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files, to deal in the Software
+without restriction.
+
+--------------------------------------------------------------------------------
+OpenCV Python Headless (opencv-python-headless)
+https://github.com/opencv/opencv-python
+Licence: MIT (packaging wrapper, Copyright (c) Olli-Pekka Heinisuo);
+OpenCV core library is licensed under Apache License 2.0 (Copyright (c) OpenCV team).
+
+--------------------------------------------------------------------------------
+Pillow (PIL fork)
+https://github.com/python-pillow/Pillow
+Licence: HPND (Historical Permission Notice and Disclaimer / MIT-CMU)
+The Python Imaging Library (PIL) is
+Copyright (c) 1997-2011 by Secret Labs AB
+Copyright (c) 1995-2011 by Fredrik Lundh and contributors
+Pillow is Copyright (c) 2010 by Jeffrey 'Alex' Clark and contributors.
+
+--------------------------------------------------------------------------------
+Decord (decord)
+https://github.com/dmlc/decord
+Licence: Apache License 2.0
+Copyright (c) by Decord Contributors.
+
+--------------------------------------------------------------------------------
+DuckDB (duckdb)
+https://github.com/duckdb/duckdb
+Licence: MIT
+Copyright 2018-2026 Stichting DuckDB Foundation
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files, to deal in the Software
+without restriction.
+
+--------------------------------------------------------------------------------
+Pandas (pandas)
+https://github.com/pandas-dev/pandas
+Licence: BSD 3-Clause
+Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and
+PyData Development Team. Copyright (c) 2011-2026, Open source contributors.
+
+--------------------------------------------------------------------------------
+Apache Arrow (pyarrow)
+https://github.com/apache/arrow
+Licence: Apache License 2.0
+Copyright 2016-2026 The Apache Software Foundation.
+
+--------------------------------------------------------------------------------
+NumPy (numpy)
+https://github.com/numpy/numpy
+Licence: BSD 3-Clause
+Copyright (c) 2005-2024, NumPy Developers.
+
+--------------------------------------------------------------------------------
+Matplotlib (matplotlib)
+https://github.com/matplotlib/matplotlib
+Licence: PSF-based Matplotlib License
+Copyright (c) 2002-2026 Matplotlib Development Team. All rights reserved.
+
+--------------------------------------------------------------------------------
+Seaborn (seaborn)
+https://github.com/mwaskom/seaborn
+Licence: BSD 3-Clause
+Copyright (c) 2012-2024, Michael L. Waskom. All rights reserved.
