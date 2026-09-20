@@ -66,7 +66,7 @@ A Poisson Labs public repository must never contain the following:
 - Stored notebook outputs must be clean: diagnostic prints that dump local paths must have their outputs cleared. Actual empirical study evidence in notebook outputs must be kept, with any local paths scrubbed to relative paths.
 
 ### 2.3 Stale, Defunct, or Personal Email Addresses
-- No personal Gmails or legacy company domain emails (e.g. `flowmode.co`) in `pyproject.toml`, documentation, git commits, or manifests. Use `work@poissonlabs.ai`.
+- No personal Gmails or legacy company domain emails (e.g. `flowmode.co`) in `pyproject.toml`, documentation, git commits, or manifests. Use `work@poissonlabs.ai` in metadata, documentation, and manifests; git commits carry the author address in checklist item 10.
 
 ### 2.4 Secrets, Credentials, and Machine Tokens
 - Never commit API keys, cloud tokens, private keys, authentication cookies, or internal server tokens.
@@ -93,3 +93,5 @@ Before releasing any Poisson Labs repository to public visibility:
 7. [ ] All agent request files and tooling traces are purged.
 8. [ ] Working tree is clean; load-bearing run data is verified; all uncommitted study files are resolved.
 9. [ ] Git commit history is reviewed: plain commit messages, zero AI attribution, no force-pushes.
+10. [ ] Author identity is the work identity: commits are authored as `TaylorKolasinski` with `taylor@poissonlabs.ai`, as author and as committer (a commit GitHub itself makes keeps GitHub as committer). That address and the personal one are both verified on the one GitHub account, so no second account is involved. A repo going public rewrites its history so every commit carries the work address; a repo staying private does not need the rewrite. A rewrite moves every commit hash, so the vault, the board, and any notes citing those hashes need re-pointing afterwards.
+11. [ ] Commits are signed, so GitHub shows them as verified rather than unverified. The signing key is registered on the GitHub account as a signing key; a key registered only for authentication still shows every commit as unverified. For a repo going public, the history rewrite resigns the existing commits in the same pass.
