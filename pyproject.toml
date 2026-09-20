@@ -10,7 +10,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [
-    { name = "Taylor Kolasinski", email = "taylor@flowmode.co" },
+    { name = "Taylor Kolasinski", email = "work@poissonlabs.ai" },
 ]
 keywords = ["v-jepa", "robustness", "video", "self-supervised", "representation"]
 classifiers = [
